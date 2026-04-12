@@ -9,20 +9,20 @@ from tenacity import (
     stop_after_attempt,
     wait_exponential,
 )
-from mcp_server.core.errors import ErrorCode
+
 from mcp_server.core.config import settings
-from mcp_server.core.errors import DatabaseError, LLMError, TwilioError
+from mcp_server.core.errors import AIError, DatabaseError, MessagingError, ErrorCode
 
 
-def twilio_retry(func):
-    """Retry Twilio calls on transient failures with exponential backoff."""
+def messaging_retry(func):
+    """Retry messaging provider calls on transient failures with exponential backoff."""
     return retry(
         stop=stop_after_attempt(settings.max_retry_attempts),
         wait=wait_exponential(
             min=settings.retry_wait_min,
             max=settings.retry_wait_max,
         ),
-        retry=retry_if_exception_type(TwilioError),
+        retry=retry_if_exception_type(MessagingError),
         reraise=True,
     )(func)
 
@@ -40,14 +40,14 @@ def db_retry(func):
     )(func)
 
 
-def llm_retry(func):
-    """Retry LLM calls on rate limits and timeouts."""
+def ai_retry(func):
+    """Retry AI provider calls on rate limits and timeouts."""
     return retry(
         stop=stop_after_attempt(settings.max_retry_attempts),
         wait=wait_exponential(
             min=settings.retry_wait_min,
             max=settings.retry_wait_max,
         ),
-        retry=retry_if_exception_type(LLMError),
+        retry=retry_if_exception_type(AIError),
         reraise=True,
     )(func)
