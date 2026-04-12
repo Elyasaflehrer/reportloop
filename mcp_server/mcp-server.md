@@ -117,10 +117,27 @@ async def write_to_db(
 
 ```
 mcp_server/
-├── server.py                 # MCP server entry point
-└── tools/
-    ├── message_tools.py      # send_message, send_reminder
-    ├── question_tools.py     # generate_questions, clean_suspicious_signs
-    ├── db_tools.py           # write_to_db
-    └── report_tools.py       # not_answered_and_report
+├── server.py
+├── tools/
+│   ├── message_tools.py
+│   ├── question_tools.py
+│   ├── db_tools.py
+│   └── report_tools.py
+├── services/
+│   ├── twilio.py
+│   ├── llm.py
+│   └── database.py
+├── models/
+│   ├── message.py
+│   ├── question.py
+│   └── database.py
+├── core/
+│   ├── config.py
+│   ├── errors.py
+│   ├── log.py
+│   └── retry.py
 ```
+
+# Implemantations
+1. langGraph
+2. The build structure
