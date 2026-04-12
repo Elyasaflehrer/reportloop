@@ -1,0 +1,62 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "reportloop-mcp-server"
+version = "0.1.0"
+description = "MCP tool layer for the reportloop AI reporting system"
+requires-python = ">=3.11"
+
+dependencies = [
+    "fastmcp>=2.0.0",
+    "pydantic>=2.0.0",
+    "pydantic-settings>=2.0.0",
+    "twilio>=9.0.0",
+    "asyncpg>=0.29.0",
+    "openai>=1.0.0",
+    "structlog>=24.0.0",
+    "tenacity>=8.0.0",
+    "python-dotenv>=1.0.0",
+    "pytest>=9.0.3",
+    "dotenv>=0.9.9",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.23.0",
+    "pytest-cov>=5.0.0",
+    "httpx>=0.27.0",
+    "respx>=0.21.0",
+    "ruff>=0.4.0",
+    "mypy>=1.10.0",
+]
+
+[project.scripts]
+mcp-server = "mcp_server.main:run"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/mcp_server"]
+
+[tool.ruff]
+src = ["src"]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.mypy]
+strict = true
+python_version = "3.11"
+files = ["src"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+addopts = "--cov=mcp_server --cov-report=term-missing"
+
+[tool.coverage.run]
+source = ["src/mcp_server"]
+omit = ["*/tests/*"]
