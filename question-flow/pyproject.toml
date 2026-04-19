@@ -11,25 +11,21 @@ dependencies = [
     # ── LangGraph / LangChain ─────────────────────────────────────────────
     "langgraph>=0.2.0",
     "langchain-core>=0.3.0",
-
     # ── MCP ───────────────────────────────────────────────────────────────
     "fastmcp>=2.0.0",
-
     # ── API server ─────────────────────────────────────────────────────────
     "fastapi>=0.115.0",
     "uvicorn[standard]>=0.30.0",
     "python-multipart>=0.0.9",   # required for Form(...) in FastAPI
-
     # ── Messaging platforms ────────────────────────────────────────────────
     "twilio>=9.0.0",
-
     # ── Configuration ──────────────────────────────────────────────────────
     "pydantic-settings>=2.0.0",
     "python-dotenv>=1.0.0",
-
     # ── Database (future feature) ──────────────────────────────────────────
     "sqlalchemy>=2.0.0",
     "asyncpg>=0.29.0",
+    "debugpy>=1.8.20",
 ]
 
 [project.optional-dependencies]

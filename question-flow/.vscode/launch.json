@@ -1,0 +1,45 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Python: Attach",
+      "type": "debugpy",
+      "request": "attach",
+      "processId": "${command:pickProcess}",
+      "justMyCode": false
+    },
+    {
+      "name": "Python: FastAPI with debugpy",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/question_flow/api/app.py", // Path to your FastAPI app
+      "args": [
+        "question_flow.api.app:app" // FastAPI app location, replace if necessary
+      ],
+      "env": {
+        "PYTHONPATH": "${workspaceFolder}/question_flow"
+      },
+      "console": "integratedTerminal",
+      "jinja": true,
+      "justMyCode": false,
+      "envFile": "${workspaceFolder}/.env", // Optional: if you're using environment variables
+    },
+    {
+      "name": "Python: FastAPI",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "uvicorn",
+      "args": [
+        "question_flow.api.app:app",      // Change 'main' to your filename and 'app' to your FastAPI instance
+        "--reload"
+      ],
+      "env": {
+        "PYTHONPATH": "${workspaceFolder}/question_flow"
+      },
+      "console": "integratedTerminal",
+      "jinja": true,
+      "justMyCode": false,
+      "envFile": "${workspaceFolder}/.env", // Optional: if you're using environment variables
+    }
+  ]
+}

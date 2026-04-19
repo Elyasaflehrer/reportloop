@@ -1,0 +1,17 @@
+[project]
+name = "backend"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "debugpy>=1.8.20",
+    "dotenv>=0.9.9",
+    "fastapi>=0.135.3",
+    "ipython>=9.12.0",
+    "langchain>=1.2.15",
+    "langchain-mcp-adapters>=0.2.2",
+    "langchain-openai>=1.1.12",
+    "langgraph>=1.1.6",
+    "requests>=2.33.1",
+]

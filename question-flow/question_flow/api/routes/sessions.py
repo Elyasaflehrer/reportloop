@@ -120,6 +120,7 @@ async def create_session(
       • Replies are collected and matched to questions.
       • Use GET /sessions/{session_id} to poll progress.
     """
+    logger.info("Creating session for recipient: %s", body.recipient)
     session_id = str(uuid.uuid4())
 
     record = SessionRecord(

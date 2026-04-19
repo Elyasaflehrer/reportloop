@@ -22,6 +22,12 @@ from question_flow.core.logging import get_logger
 
 logger = get_logger(__name__)
 
+# ── Debugpy ───────────────────────────────────────────────────────────────────
+# import debugpy
+# # Start the debugpy debugger, listening on port 5678
+# debugpy.listen(("0.0.0.0", 5678))
+# print("Debugger is ready. Please start debugging in VSCode.")
+# debugpy.wait_for_client()  # Will pause until VSCode attaches to the debugger
 
 # ── Lifespan ──────────────────────────────────────────────────────────────────
 

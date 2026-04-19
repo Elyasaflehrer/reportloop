@@ -1,0 +1,21 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+      {
+        "name": "Python: FastAPI with debugpy",
+        "type": "debugpy",
+        "request": "launch",
+        "program": "${workspaceFolder}/question-flow/question_flow/api/app.py",  // Path to your FastAPI app
+        "args": [
+          "question_flow.api.app:app"  // FastAPI app location, replace if necessary
+        ],
+        "env": {
+          "PYTHONPATH": "${workspaceFolder}/question-flow"
+        },
+        "console": "integratedTerminal",
+        "justMyCode": true,
+        "envFile": "${workspaceFolder}/question-flow/.env",  // Optional: if you're using environment variables
+        // "debugOptions": ["RedirectOutput"]
+      }
+    ]
+  }
