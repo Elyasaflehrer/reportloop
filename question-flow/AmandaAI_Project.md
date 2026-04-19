@@ -158,7 +158,7 @@ flowchart TD
   * edit_phone_number
 
 **Notes:**
-1. (Optional )Implemented via Python abstract base classes (ABC). Each provider has a concrete implementation. Switching providers requires only changing the injected class - no business logic changes." This tells a developer exactly the pattern to use. 
+1. (Optional) Implemented via Python abstract base classes (ABC). Each provider has a concrete implementation. Switching providers requires only changing the injected class - no business logic changes." This tells a developer exactly the pattern to use.
 2. Two Cases 
 ***a.*** scheduled time the message will be sent to all employees' cell phones
 ***b.*** no message complete_report -> send_sms_to_employee the message will be sent only to a specific employee's cell phone number
