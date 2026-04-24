@@ -1,0 +1,262 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DATABASE_URL_DIRECT")
+}
+
+// ─── ENUMS ───────────────────────────────────────────────────────────────────
+
+enum UserRole {
+  admin
+  manager
+  viewer
+  participant
+}
+
+enum DayOfWeek {
+  Sunday
+  Monday
+  Tuesday
+  Wednesday
+  Thursday
+  Friday
+  Saturday
+}
+
+enum RecipientMode {
+  all
+  subset
+}
+
+enum BroadcastStatus {
+  pending
+  in_progress
+  completed
+  failed
+}
+
+enum ConversationStatus {
+  pending
+  awaiting_reply
+  processing
+  completed
+  timed_out
+  superseded
+  failed
+}
+
+enum MessageRole {
+  ai
+  participant
+}
+
+// ─── MODELS ──────────────────────────────────────────────────────────────────
+
+// All people in the system — admins, managers, viewers, and participants.
+// Participants may start with no email (SMS-only). When email is added,
+// a Supabase account is created and supabase_id is populated.
+model User {
+  id          Int       @id @default(autoincrement())
+  supabaseId  String?   @unique @map("supabase_id")
+  name        String
+  email       String?   @unique                      // nullable — participants may have no email yet
+  phone       String?   @unique                      // E.164 — required for participants
+  initials    String?
+  title       String?
+  role        UserRole
+  active      Boolean   @default(true)
+  smsOptedOut Boolean   @default(false) @map("sms_opted_out")
+  deletedAt   DateTime? @map("deleted_at")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+
+  questions         Question[]
+  schedules         Schedule[]
+  groupMembers      GroupMember[]
+  managerGroups     ManagerGroup[]
+  scheduleRecipient ScheduleRecipient[]
+  conversations     Conversation[]
+  triggeredCasts    Broadcast[]
+
+  @@map("users")
+}
+
+model Group {
+  id          Int       @id @default(autoincrement())
+  name        String
+  description String?
+  deletedAt   DateTime? @map("deleted_at")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+
+  members      GroupMember[]
+  managerLinks ManagerGroup[]
+
+  @@map("groups")
+}
+
+model GroupMember {
+  id      Int @id @default(autoincrement())
+  groupId Int @map("group_id")
+  userId  Int @map("user_id")
+
+  group Group @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([groupId, userId])
+  @@index([userId])
+  @@map("group_members")
+}
+
+model ManagerGroup {
+  managerId Int @map("manager_id")
+  groupId   Int @map("group_id")
+
+  manager User  @relation(fields: [managerId], references: [id], onDelete: Cascade)
+  group   Group @relation(fields: [groupId], references: [id], onDelete: Cascade)
+
+  @@id([managerId, groupId])
+  @@index([managerId])
+  @@map("manager_groups")
+}
+
+model Question {
+  id        Int       @id @default(autoincrement())
+  managerId Int       @map("manager_id")
+  text      String
+  deletedAt DateTime? @map("deleted_at")
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
+
+  manager           User               @relation(fields: [managerId], references: [id], onDelete: Cascade)
+  scheduleQuestions ScheduleQuestion[]
+  answers           Answer[]
+
+  @@map("questions")
+}
+
+model Schedule {
+  id            Int           @id @default(autoincrement())
+  managerId     Int           @map("manager_id")
+  label         String?
+  dayOfWeek     DayOfWeek     @map("day_of_week")
+  timeOfDay     String        @map("time_of_day")
+  timezone      String
+  active        Boolean       @default(true)
+  recipientMode RecipientMode @map("recipient_mode")
+  deletedAt     DateTime?     @map("deleted_at")
+  createdAt     DateTime      @default(now()) @map("created_at")
+  updatedAt     DateTime      @updatedAt @map("updated_at")
+
+  manager            User                @relation(fields: [managerId], references: [id], onDelete: Cascade)
+  scheduleRecipients ScheduleRecipient[]
+  scheduleQuestions  ScheduleQuestion[]
+  broadcasts         Broadcast[]
+
+  @@map("schedules")
+}
+
+model ScheduleRecipient {
+  scheduleId Int @map("schedule_id")
+  userId     Int @map("user_id")
+
+  schedule Schedule @relation(fields: [scheduleId], references: [id], onDelete: Cascade)
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([scheduleId, userId])
+  @@map("schedule_recipients")
+}
+
+model ScheduleQuestion {
+  scheduleId Int @map("schedule_id")
+  questionId Int @map("question_id")
+
+  schedule Schedule @relation(fields: [scheduleId], references: [id], onDelete: Cascade)
+  question Question @relation(fields: [questionId], references: [id], onDelete: Cascade)
+
+  @@id([scheduleId, questionId])
+  @@map("schedule_questions")
+}
+
+model Broadcast {
+  id          Int             @id @default(autoincrement())
+  scheduleId  Int             @map("schedule_id")
+  fireDate    String          @map("fire_date")
+  status      BroadcastStatus @default(pending)
+  triggeredAt DateTime        @default(now()) @map("triggered_at")
+  triggeredBy Int?            @map("triggered_by")
+
+  schedule      Schedule       @relation(fields: [scheduleId], references: [id])
+  triggeredUser User?          @relation(fields: [triggeredBy], references: [id])
+  conversations Conversation[]
+
+  @@unique([scheduleId, fireDate])
+  @@index([scheduleId, triggeredAt])
+  @@map("broadcasts")
+}
+
+model Conversation {
+  id            Int                @id @default(autoincrement())
+  broadcastId   Int                @map("broadcast_id")
+  userId        Int                @map("user_id")
+  status        ConversationStatus @default(pending)
+  startedAt     DateTime?          @map("started_at")
+  completedAt   DateTime?          @map("completed_at")
+  failedAt      DateTime?          @map("failed_at")
+  failReason    String?            @map("fail_reason")
+  lastMessageAt DateTime?          @map("last_message_at")
+  remindersSent Int                @default(0) @map("reminders_sent")
+
+  broadcast Broadcast @relation(fields: [broadcastId], references: [id])
+  user      User      @relation(fields: [userId], references: [id])
+  messages  Message[]
+  answers   Answer[]
+
+  @@index([userId, status])
+  @@index([status])
+  @@index([lastMessageAt])
+  @@map("conversations")
+}
+
+model Message {
+  id             Int         @id @default(autoincrement())
+  conversationId Int         @map("conversation_id")
+  role           MessageRole
+  body           String
+  sentAt         DateTime    @default(now()) @map("sent_at")
+  twilioSid      String?     @unique @map("twilio_sid")
+
+  conversation Conversation @relation(fields: [conversationId], references: [id])
+
+  @@map("messages")
+}
+
+model Answer {
+  id             Int      @id @default(autoincrement())
+  conversationId Int      @map("conversation_id")
+  questionId     Int      @map("question_id")
+  answer         String
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  conversation Conversation @relation(fields: [conversationId], references: [id])
+  question     Question     @relation(fields: [questionId], references: [id])
+
+  @@unique([conversationId, questionId])
+  @@index([conversationId])
+  @@map("answers")
+}
+
+model InboundAuditLog {
+  id             Int      @id @default(autoincrement())
+  fromPhone      String   @map("from_phone")
+  body           String
+  conversationId Int?     @map("conversation_id")
+  reason         String
+  receivedAt     DateTime @default(now()) @map("received_at")
+
+  @@map("inbound_audit_logs")
+}

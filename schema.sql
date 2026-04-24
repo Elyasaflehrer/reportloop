@@ -13,34 +13,28 @@ BEGIN NEW.updated_at = now(); RETURN NEW; END;
 $$;
 
 -- ─── USERS ───────────────────────────────────────────────────────────────────
+-- All people in the system: admins, managers, viewers, and participants.
+-- Participants (SMS recipients) may start with no email — email is nullable.
+-- email is UNIQUE but NULLable: PostgreSQL UNIQUE ignores NULL values so two
+-- participants without email don't conflict.
+-- supabase_id is NULL until the participant's email is set and their Supabase
+-- account is created — at that point they can log in.
 CREATE TABLE users (
-  id          SERIAL PRIMARY KEY,
-  supabase_id TEXT UNIQUE,
-  name        TEXT NOT NULL,
-  email       TEXT UNIQUE NOT NULL,
-  phone       TEXT,
-  initials    TEXT,
-  title       TEXT,
-  role        user_role NOT NULL,
-  active      BOOLEAN DEFAULT true,
-  created_at  TIMESTAMPTZ DEFAULT now(),
-  updated_at  TIMESTAMPTZ DEFAULT now()
-);
-CREATE TRIGGER users_updated_at BEFORE UPDATE ON users
-  FOR EACH ROW EXECUTE FUNCTION set_updated_at();
-
--- ─── EMPLOYEES ───────────────────────────────────────────────────────────────
-CREATE TABLE employees (
   id            SERIAL PRIMARY KEY,
+  supabase_id   TEXT UNIQUE,
   name          TEXT NOT NULL,
-  phone         TEXT UNIQUE NOT NULL,   -- E.164 format e.g. +15551234567
-  property      TEXT,
+  email         TEXT UNIQUE,                -- NULL allowed for participants without login yet
+  phone         TEXT UNIQUE,               -- E.164 format e.g. +15551234567 (required for participants)
+  initials      TEXT,
+  title         TEXT,
+  role          user_role NOT NULL,
   active        BOOLEAN DEFAULT true,
-  sms_opted_out BOOLEAN DEFAULT false,
+  sms_opted_out BOOLEAN DEFAULT false,     -- set by Twilio STOP/UNSTOP webhooks only
+  deleted_at    TIMESTAMPTZ,               -- soft delete
   created_at    TIMESTAMPTZ DEFAULT now(),
   updated_at    TIMESTAMPTZ DEFAULT now()
 );
-CREATE TRIGGER employees_updated_at BEFORE UPDATE ON employees
+CREATE TRIGGER users_updated_at BEFORE UPDATE ON users
   FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 
 -- ─── GROUPS ──────────────────────────────────────────────────────────────────
@@ -48,6 +42,7 @@ CREATE TABLE groups (
   id          SERIAL PRIMARY KEY,
   name        TEXT NOT NULL,
   description TEXT,
+  deleted_at  TIMESTAMPTZ,
   created_at  TIMESTAMPTZ DEFAULT now(),
   updated_at  TIMESTAMPTZ DEFAULT now()
 );
@@ -55,17 +50,13 @@ CREATE TRIGGER groups_updated_at BEFORE UPDATE ON groups
   FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 
 -- ─── GROUP MEMBERS ───────────────────────────────────────────────────────────
--- A group can contain platform users (user_id) or employees (employee_id).
 CREATE TABLE group_members (
-  id          SERIAL PRIMARY KEY,
-  group_id    INT NOT NULL REFERENCES groups(id)    ON DELETE CASCADE,
-  user_id     INT          REFERENCES users(id)     ON DELETE CASCADE,
-  employee_id INT          REFERENCES employees(id) ON DELETE CASCADE,
-  UNIQUE (group_id, user_id),
-  UNIQUE (group_id, employee_id)
+  id       SERIAL PRIMARY KEY,
+  group_id INT NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
+  user_id  INT NOT NULL REFERENCES users(id)  ON DELETE CASCADE,
+  UNIQUE (group_id, user_id)
 );
-CREATE INDEX gm_user_id_idx     ON group_members(user_id);
-CREATE INDEX gm_employee_id_idx ON group_members(employee_id);
+CREATE INDEX gm_user_id_idx ON group_members(user_id);
 
 -- ─── MANAGER GROUPS ──────────────────────────────────────────────────────────
 -- Which managers oversee which groups (scope derived at query time via these joins).
@@ -81,6 +72,7 @@ CREATE TABLE questions (
   id         SERIAL PRIMARY KEY,
   manager_id INT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   text       TEXT NOT NULL,
+  deleted_at TIMESTAMPTZ,
   created_at TIMESTAMPTZ DEFAULT now(),
   updated_at TIMESTAMPTZ DEFAULT now()
 );
@@ -97,16 +89,17 @@ CREATE TABLE schedules (
   timezone       TEXT NOT NULL,    -- IANA e.g. "America/New_York"
   active         BOOLEAN DEFAULT true,
   recipient_mode recipient_mode NOT NULL,
+  deleted_at     TIMESTAMPTZ,
   created_at     TIMESTAMPTZ DEFAULT now(),
   updated_at     TIMESTAMPTZ DEFAULT now()
 );
 CREATE TRIGGER schedules_updated_at BEFORE UPDATE ON schedules
   FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 
-CREATE TABLE schedule_employees (
-  schedule_id INT NOT NULL REFERENCES schedules(id)  ON DELETE CASCADE,
-  employee_id INT NOT NULL REFERENCES employees(id)  ON DELETE CASCADE,
-  PRIMARY KEY (schedule_id, employee_id)
+CREATE TABLE schedule_recipients (
+  schedule_id INT NOT NULL REFERENCES schedules(id) ON DELETE CASCADE,
+  user_id     INT NOT NULL REFERENCES users(id)     ON DELETE CASCADE,
+  PRIMARY KEY (schedule_id, user_id)
 );
 
 CREATE TABLE schedule_questions (
@@ -131,9 +124,8 @@ CREATE INDEX broadcasts_schedule_triggered_idx ON broadcasts(schedule_id, trigge
 CREATE TABLE conversations (
   id              SERIAL PRIMARY KEY,
   broadcast_id    INT NOT NULL REFERENCES broadcasts(id),
-  employee_id     INT NOT NULL REFERENCES employees(id),
+  user_id         INT NOT NULL REFERENCES users(id),
   status          conversation_status DEFAULT 'pending',
-  occupancy       INT,
   started_at      TIMESTAMPTZ,
   completed_at    TIMESTAMPTZ,
   failed_at       TIMESTAMPTZ,
@@ -141,9 +133,9 @@ CREATE TABLE conversations (
   last_message_at TIMESTAMPTZ,
   reminders_sent  INT DEFAULT 0
 );
-CREATE INDEX conv_employee_status_idx ON conversations(employee_id, status);
-CREATE INDEX conv_status_idx          ON conversations(status);
-CREATE INDEX conv_last_message_idx    ON conversations(last_message_at);
+CREATE INDEX conv_user_status_idx   ON conversations(user_id, status);
+CREATE INDEX conv_status_idx        ON conversations(status);
+CREATE INDEX conv_last_message_idx  ON conversations(last_message_at);
 
 -- ─── MESSAGES ────────────────────────────────────────────────────────────────
 CREATE TABLE messages (
@@ -183,20 +175,19 @@ CREATE TABLE inbound_audit_logs (
 -- (service_role key bypasses RLS). Direct browser access via anon key is blocked.
 -- Phase 6 adds scoped per-user policies as a second layer of defense.
 
-ALTER TABLE users               ENABLE ROW LEVEL SECURITY;
-ALTER TABLE employees           ENABLE ROW LEVEL SECURITY;
-ALTER TABLE groups              ENABLE ROW LEVEL SECURITY;
-ALTER TABLE group_members       ENABLE ROW LEVEL SECURITY;
-ALTER TABLE manager_groups      ENABLE ROW LEVEL SECURITY;
-ALTER TABLE questions           ENABLE ROW LEVEL SECURITY;
-ALTER TABLE schedules           ENABLE ROW LEVEL SECURITY;
-ALTER TABLE schedule_employees  ENABLE ROW LEVEL SECURITY;
-ALTER TABLE schedule_questions  ENABLE ROW LEVEL SECURITY;
-ALTER TABLE broadcasts          ENABLE ROW LEVEL SECURITY;
-ALTER TABLE conversations       ENABLE ROW LEVEL SECURITY;
-ALTER TABLE messages            ENABLE ROW LEVEL SECURITY;
-ALTER TABLE answers             ENABLE ROW LEVEL SECURITY;
-ALTER TABLE inbound_audit_logs  ENABLE ROW LEVEL SECURITY;
+ALTER TABLE users                ENABLE ROW LEVEL SECURITY;
+ALTER TABLE groups               ENABLE ROW LEVEL SECURITY;
+ALTER TABLE group_members        ENABLE ROW LEVEL SECURITY;
+ALTER TABLE manager_groups       ENABLE ROW LEVEL SECURITY;
+ALTER TABLE questions            ENABLE ROW LEVEL SECURITY;
+ALTER TABLE schedules            ENABLE ROW LEVEL SECURITY;
+ALTER TABLE schedule_recipients  ENABLE ROW LEVEL SECURITY;
+ALTER TABLE schedule_questions   ENABLE ROW LEVEL SECURITY;
+ALTER TABLE broadcasts           ENABLE ROW LEVEL SECURITY;
+ALTER TABLE conversations        ENABLE ROW LEVEL SECURITY;
+ALTER TABLE messages             ENABLE ROW LEVEL SECURITY;
+ALTER TABLE answers              ENABLE ROW LEVEL SECURITY;
+ALTER TABLE inbound_audit_logs   ENABLE ROW LEVEL SECURITY;
 
 -- ─── TEST USER SETUP ─────────────────────────────────────────────────────────
 -- After creating your user in Supabase dashboard (Authentication → Users → Add user),

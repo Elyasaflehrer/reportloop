@@ -263,7 +263,7 @@ backend/
 │   │   ├── auth.ts
 │   │   ├── users.ts
 │   │   ├── groups.ts
-│   │   ├── employees.ts
+│   │   ├── participants.ts
 │   │   ├── questions.ts
 │   │   ├── schedules.ts
 │   │   └── webhooks.ts
@@ -561,7 +561,7 @@ Groups CRUD + member management + manager↔group link management.
 
 **Key details:**
 - `DELETE /groups/:id` cascades to `GroupMember` and `ManagerGroup` via Prisma `onDelete: Cascade`.
-- Adding a member checks the user/employee exists before inserting.
+- Adding a member checks the user exists before inserting.
 - `GET /admin/setup-status` is implemented here — counts groups, links, memberships, and validates viewer coverage.
 
 **Why setup-status matters:**  
@@ -569,17 +569,20 @@ New admins need a clear indicator of what's configured before broadcasts can wor
 
 ---
 
-### Step 11 — Employees CRUD
+### Step 11 — Participants CRUD
 
-**File:** `backend/src/routes/employees.ts`
+**File:** `backend/src/routes/participants.ts`
 
 **What:**  
-`GET /employees`, `POST /employees`, `PATCH /employees/:id`, `DELETE /employees/:id`
+`GET /participants`, `POST /participants`, `PATCH /participants/:id`, `DELETE /participants/:id`
+
+Participants are users with `role = 'participant'`. They receive SMS broadcasts and may optionally have a platform login.
 
 **Key details:**
-- Manager scope: `GET /employees` for a manager returns only employees in their groups (via `ManagerGroup` → `GroupMember` join).
+- Manager scope: `GET /participants` for a manager returns only participants in their groups (via `ManagerGroup` → `GroupMember` join).
 - `phone` must be E.164 format — validated by Zod regex (`/^\+[1-9]\d{1,14}$/`).
-- `smsOptedOut` is read-only via API — only the Twilio STOP webhook can set it to `true`; UNSTOP sets it back to `false`.
+- `email` is optional on create. When email is added via `PATCH`, the backend creates a Supabase account and populates `supabase_id` — the participant can now log in.
+- `smsOptedOut` is read-only via API — only the Twilio STOP/UNSTOP webhooks can change it.
 
 ---
 
@@ -588,7 +591,7 @@ New admins need a clear indicator of what's configured before broadcasts can wor
 **Files:** `backend/src/routes/questions.ts`, `backend/src/routes/schedules.ts`
 
 **What:**  
-Manager-scoped CRUD for questions and schedules, including their join tables (`ScheduleQuestion`, `ScheduleEmployee`).
+Manager-scoped CRUD for questions and schedules, including their join tables (`ScheduleQuestion`, `ScheduleRecipient`).
 
 **Key details:**
 - On `POST /managers/:id/questions` and `PATCH`: compute the projected SMS bundle length for all questions attached to all schedules that use this question. If > `SMS_MAX_LENGTH` → 400 error. If > 80% → 200 with a `warning` field.
@@ -653,7 +656,7 @@ export function createSmsProvider(): ISmsProvider {
 Called once in `index.ts` on startup. If `SMS_PROVIDER=twilio` but Twilio config is `null` → throws immediately with a clear error.
 
 **`sms.service.ts` — bundle building (provider-agnostic):**  
-`buildBundleMessage(employee, questions)` — assembles the SMS bundle and enforces the length limit. Has no knowledge of any provider.
+`buildBundleMessage(participant, questions)` — assembles the SMS bundle and enforces the length limit. Has no knowledge of any provider.
 
 ```
 Hey [name], quick check-in this week:
@@ -690,10 +693,10 @@ Error translation: Twilio SDK errors are mapped to domain errors (`TwilioDeliver
 **File:** `backend/src/services/ai.service.ts`
 
 **What:**  
-`extractAnswers(questions, employeeReply)` — sends the employee's reply to Claude with structured output instructions and returns `[{ questionId, answer | null }]`.
+`extractAnswers(questions, reply)` — sends the participant's reply to Claude with structured output instructions and returns `[{ questionId, answer | null }]`.
 
 **Why Claude for extraction:**  
-Employees reply in natural language. They don't write "1. 45 rooms, 2. No issues". They write "45 rooms tonight, all good, team is a bit tired". Claude maps free text to the right questions using context, not just keyword matching.
+Participants reply in natural language — not structured answers. Claude maps free text to the right questions using context, not keyword matching.
 
 **Prompt:**  
 ```
@@ -702,11 +705,11 @@ You are extracting answers from an SMS reply sent by a hotel property manager.
 Questions asked:
 {{numberedQuestionList}}
 
-Employee reply:
-"{{employeeReply}}"
+Participant reply:
+"{{reply}}"
 
 Return JSON: { "answers": [{ "questionId": n, "answer": "string or null" }] }
-Rules: match by number or context; null if missing or unclear; never invent; occupancy = integer/percent.
+Rules: match by number or context; null if missing or unclear; never invent.
 ```
 
 **Why `null` instead of guessing:**  
@@ -729,20 +732,21 @@ const response = await anthropic.messages.create({
 **File:** `backend/src/services/broadcast.service.ts`
 
 **What:**  
-`runBroadcast(scheduleId)` — the full orchestration: load schedule + questions + employees → create Broadcast → loop employees → build SMS → send → create Conversation + Message.
+`runBroadcast(scheduleId)` — the full orchestration: load schedule + questions + participants → create Broadcast → loop participants → build SMS → send → create Conversation + Message.
 
 **Why a service layer (not inline in the worker):**  
 - The worker is responsible for queue mechanics (retries, concurrency). The service is responsible for business logic. Keeping them separate means we can call `runBroadcast` from tests without a BullMQ queue.
 - `POST /broadcasts/trigger` (manual trigger) calls the same service — no duplicate code.
 
-**Employee loop logic:**
+**Participant loop logic:**
 1. Skip if `smsOptedOut = true` → log skip.
-2. Supersede any open Conversation for this employee (set `status = superseded`, `failReason = SUPERSEDED_BY_NEW_BROADCAST`).
-3. Build SMS bundle → enforce length (throws `SmsTooLongError` if over limit).
-4. Create `Conversation` (`status = awaiting_reply`, `lastMessageAt = now`).
-5. Call `sendSms` → get `twilioSid`.
-6. Save `Message` (`role = ai`, `twilioSid`).
-7. If `SmsTooLongError`: set Conversation `status = failed`, `failReason = SMS_TOO_LONG`, Sentry alert — continue loop for other employees.
+2. Skip if `phone = null` → log skip (participant has no phone yet).
+3. Supersede any open Conversation for this participant (set `status = superseded`, `failReason = SUPERSEDED_BY_NEW_BROADCAST`).
+4. Build SMS bundle → enforce length (throws `SmsTooLongError` if over limit).
+5. Create `Conversation` (`status = awaiting_reply`, `lastMessageAt = now`).
+6. Call `sendSms` → get message ID.
+7. Save `Message` (`role = ai`, `twilioSid = messageId`).
+8. If `SmsTooLongError`: set Conversation `status = failed`, `failReason = SMS_TOO_LONG`, Sentry alert — continue loop for other participants.
 
 **After loop:**  
 Check if all Conversations are in terminal state (all failed for e.g. all opted-out) → set Broadcast `status = completed`.
@@ -834,10 +838,10 @@ Twilio expects a 200 within 15 seconds. If our handler takes longer (DB query, C
 
 **Inbound SMS flow (detailed):**
 1. Signature validation — `twilio.validateRequest()` with `TWILIO_AUTH_TOKEN`. 403 if invalid. This prevents anyone from spoofing inbound messages.
-2. `STOP` body → `Employee.smsOptedOut = true`, close open Conversation. Done.
+2. `STOP` body → `User.smsOptedOut = true`, close open Conversation. Done.
 3. `UNSTOP` body → `smsOptedOut = false`. Done.
 4. Idempotency check: `Message WHERE twilioSid = SmsSid` exists → skip (Twilio is retrying).
-5. Find open Conversation by `Employee.phone = From`.
+5. Find open Conversation by `User.phone = From`.
 6. Atomic ping-pong lock:
    ```sql
    UPDATE conversations SET status = 'processing'
@@ -868,12 +872,11 @@ Some phones split long replies into multiple SMS segments. Twilio delivers each 
 4. Store confident Answer rows (`answer !== null`).
 5. If answers found:
    - Set `Conversation.status = completed`, `completedAt = now`.
-   - Extract `occupancy` value if present.
    - Check if all Broadcast's Conversations are terminal → Broadcast `status = completed`.
-6. If 0 answers (employee replied but Claude found nothing):
+6. If 0 answers (participant replied but Claude found nothing):
    - Send acknowledgment: `"Got it! Please reply with your answers when ready."`
    - Save as `Message(role=ai)`.
-   - Reset Conversation → `awaiting_reply` (ping-pong maintained, employee's turn again).
+   - Reset Conversation → `awaiting_reply` (ping-pong maintained, participant's turn again).
 
 ---
 
@@ -906,7 +909,7 @@ Add `const USE_API = false` at the top of `AI_Reporter.html`. Flip to `true` per
 **Migration order:**
 1. Auth (`GET /auth/me`, `POST /auth/logout`) — Supabase JS client handles sign-in.
 2. Users + Groups + Manager Groups.
-3. Employees.
+3. Participants.
 4. Questions + Schedules.
 5. Conversations / history reads.
 6. Broadcast trigger + status polling.
@@ -918,7 +921,7 @@ Rolling back is trivial — flip `USE_API` back to `false` for that domain. If w
 **Rules during cutover:**
 - JWT stored in memory only (not localStorage, not sessionStorage).
 - Every API error surfaces a visible user-facing message — no silent failures.
-- Empty states handled explicitly (e.g., "No employees yet" not a blank table).
+- Empty states handled explicitly (e.g., "No participants yet" not a blank table).
 
 ---
 
