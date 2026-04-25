@@ -5,6 +5,7 @@ import rateLimit from '@fastify/rate-limit'
 import { config } from './config.js'
 import { healthRoutes } from './routes/health.js'
 import { authRoutes } from './routes/auth.js'
+import { usersRoutes } from './routes/users.js'
 
 export async function buildApp(): Promise<FastifyInstance> {
   const app = Fastify({
@@ -63,7 +64,8 @@ export async function buildApp(): Promise<FastifyInstance> {
   // Registered here as each step is implemented:
   await app.register(healthRoutes)
   await app.register(authRoutes)
-  // Step 9:  users
+  await app.register(usersRoutes)
+  // Step 10: groups
   // Step 10: groups
   // Step 11: participants
   // Step 12: questions, schedules
