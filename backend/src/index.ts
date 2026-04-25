@@ -4,6 +4,8 @@ import { config } from './config.js'
 import { prisma } from './db.js'
 import { startBroadcastWorker } from './jobs/broadcast.worker.js'
 import { startScheduler } from './jobs/scheduler.js'
+import { startReminderWorker } from './jobs/reminder.worker.js'
+import { createSmsProvider } from './services/sms/sms.factory.js'
 
 async function start() {
   const app = await buildApp()
@@ -12,11 +14,21 @@ async function start() {
 
   let broadcastWorker: Awaited<ReturnType<typeof startBroadcastWorker>> | undefined
 
+  let reminderWorker: ReturnType<typeof startReminderWorker> | undefined
+
   if (config.twilio && config.ai) {
     broadcastWorker = startBroadcastWorker()
     app.log.info('[workers] broadcast worker started')
   } else {
     app.log.warn('[workers] broadcast worker skipped — Twilio or AI provider not configured')
+  }
+
+  if (config.twilio) {
+    const smsProvider = createSmsProvider()
+    reminderWorker = startReminderWorker(smsProvider)
+    app.log.info('[workers] reminder worker started')
+  } else {
+    app.log.warn('[workers] reminder worker skipped — Twilio not configured')
   }
 
   const scheduler = startScheduler()
@@ -30,9 +42,9 @@ async function start() {
       await app.close()
 
       if (broadcastWorker) await broadcastWorker.close()
+      if (reminderWorker)  reminderWorker.stop()
       scheduler.stop()
       // await conversationWorker.close()  — Step 20
-      // await reminderWorker.close()      — Step 19
 
       await prisma.$disconnect()
 
