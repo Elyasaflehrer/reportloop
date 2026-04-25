@@ -6,6 +6,7 @@ import { config } from './config.js'
 import { healthRoutes } from './routes/health.js'
 import { authRoutes } from './routes/auth.js'
 import { usersRoutes } from './routes/users.js'
+import { groupsRoutes } from './routes/groups.js'
 
 export async function buildApp(): Promise<FastifyInstance> {
   const app = Fastify({
@@ -65,7 +66,8 @@ export async function buildApp(): Promise<FastifyInstance> {
   await app.register(healthRoutes)
   await app.register(authRoutes)
   await app.register(usersRoutes)
-  // Step 10: groups
+  await app.register(groupsRoutes)
+  // Step 11: participants
   // Step 10: groups
   // Step 11: participants
   // Step 12: questions, schedules
