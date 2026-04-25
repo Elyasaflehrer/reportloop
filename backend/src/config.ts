@@ -33,9 +33,11 @@ const schema = z.object({
     fromNumber: z.string().min(1),
   }).nullable().default(null),
 
-  // Optional — required only when AI answer extraction is used (Phase 3).
-  anthropic: z.object({
-    apiKey: z.string().min(1),
+  // Optional — required only when AI features are used (Phase 3).
+  // Supports multiple providers: set AI_PROVIDER to 'anthropic' (default) or 'openai'.
+  ai: z.object({
+    provider: z.enum(['anthropic', 'openai']).default('anthropic'),
+    apiKey:   z.string().min(1),
   }).nullable().default(null),
 
   sms: z.object({
@@ -92,8 +94,11 @@ export const config = schema.parse({
     fromNumber: process.env.TWILIO_FROM_NUMBER,
   } : null,
 
-  anthropic: process.env.ANTHROPIC_API_KEY
-    ? { apiKey: process.env.ANTHROPIC_API_KEY }
+  ai: process.env.ANTHROPIC_API_KEY || process.env.OPENAI_API_KEY
+    ? {
+        provider: (process.env.AI_PROVIDER ?? 'anthropic') as 'anthropic' | 'openai',
+        apiKey:   (process.env.ANTHROPIC_API_KEY || process.env.OPENAI_API_KEY)!,
+      }
     : null,
 
   sms: {
