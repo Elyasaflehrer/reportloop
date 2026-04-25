@@ -2,9 +2,21 @@ import 'dotenv/config'
 import { buildApp } from './app.js'
 import { config } from './config.js'
 import { prisma } from './db.js'
+import { startBroadcastWorker } from './jobs/broadcast.worker.js'
 
 async function start() {
   const app = await buildApp()
+
+  // ─── WORKERS ──────────────────────────────────────────────────────────────
+
+  let broadcastWorker: Awaited<ReturnType<typeof startBroadcastWorker>> | undefined
+
+  if (config.twilio && config.ai) {
+    broadcastWorker = startBroadcastWorker()
+    app.log.info('[workers] broadcast worker started')
+  } else {
+    app.log.warn('[workers] broadcast worker skipped — Twilio or AI provider not configured')
+  }
 
   // ─── GRACEFUL SHUTDOWN ────────────────────────────────────────────────────
 
@@ -12,13 +24,12 @@ async function start() {
     app.log.info(`${signal} received — shutting down gracefully`)
 
     try {
-      await app.close()          // stop accepting new HTTP requests
+      await app.close()
 
-      // Workers and scheduler are closed here as they are added:
-      // await broadcastWorker.close()
-      // await conversationWorker.close()
-      // await reminderWorker.close()
-      // scheduler.stop()
+      if (broadcastWorker) await broadcastWorker.close()
+      // await conversationWorker.close()  — Step 20
+      // await reminderWorker.close()      — Step 19
+      // scheduler.stop()                  — Step 18
 
       await prisma.$disconnect()
 
