@@ -3,6 +3,7 @@ import { buildApp } from './app.js'
 import { config } from './config.js'
 import { prisma } from './db.js'
 import { startBroadcastWorker } from './jobs/broadcast.worker.js'
+import { startScheduler } from './jobs/scheduler.js'
 
 async function start() {
   const app = await buildApp()
@@ -18,6 +19,8 @@ async function start() {
     app.log.warn('[workers] broadcast worker skipped — Twilio or AI provider not configured')
   }
 
+  const scheduler = startScheduler()
+
   // ─── GRACEFUL SHUTDOWN ────────────────────────────────────────────────────
 
   const shutdown = async (signal: string) => {
@@ -27,9 +30,9 @@ async function start() {
       await app.close()
 
       if (broadcastWorker) await broadcastWorker.close()
+      scheduler.stop()
       // await conversationWorker.close()  — Step 20
       // await reminderWorker.close()      — Step 19
-      // scheduler.stop()                  — Step 18
 
       await prisma.$disconnect()
 
