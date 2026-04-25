@@ -8,6 +8,8 @@ import { authRoutes } from './routes/auth.js'
 import { usersRoutes } from './routes/users.js'
 import { groupsRoutes } from './routes/groups.js'
 import { participantsRoutes } from './routes/participants.js'
+import { questionsRoutes } from './routes/questions.js'
+import { schedulesRoutes } from './routes/schedules.js'
 
 export async function buildApp(): Promise<FastifyInstance> {
   const app = Fastify({
@@ -69,7 +71,9 @@ export async function buildApp(): Promise<FastifyInstance> {
   await app.register(usersRoutes)
   await app.register(groupsRoutes)
   await app.register(participantsRoutes)
-  // Step 12: questions, schedules
+  await app.register(questionsRoutes)
+  await app.register(schedulesRoutes)
+  // Step 13: SMS provider abstraction
   // Step 10: groups
   // Step 11: participants
   // Step 12: questions, schedules
