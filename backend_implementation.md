@@ -668,16 +668,8 @@ export function createSmsProvider(): ISmsProvider {
 
 Called once in `index.ts` on startup. If `SMS_PROVIDER=twilio` but Twilio config is `null` → throws immediately with a clear error.
 
-**`sms.service.ts` — bundle building (provider-agnostic):**  
-`buildBundleMessage(participant, questions)` — assembles the SMS bundle and enforces the length limit. Has no knowledge of any provider.
-
-```
-Hey [name], quick check-in this week:
-1. [question 1]
-2. [question 2]
-...
-Just reply with your answers — no need to be formal!
-```
+**`sms.service.ts` — length enforcement only (provider-agnostic):**  
+`validateMessageLength(body)` — checks that an AI-generated message fits within the SMS limit. Has no knowledge of any provider and does not build messages (the AI provider does that).
 
 Length enforcement:
 - `> SMS_MAX_LENGTH` → throw `SmsTooLongError`. Broadcast worker catches this and marks the Conversation `failed`.
@@ -701,42 +693,79 @@ Error translation: Twilio SDK errors are mapped to domain errors (`TwilioDeliver
 
 ---
 
-### Step 15 — `ai.service.ts`
+### Step 15 — AI provider abstraction
 
-**File:** `backend/src/services/ai.service.ts`
+**Files:**
+- `backend/src/services/ai/ai.provider.interface.ts`
+- `backend/src/services/ai/ai.factory.ts`
+- `backend/src/services/ai/providers/anthropic.provider.ts`
+- `backend/src/services/ai/providers/openai.provider.ts` (future)
 
-**What:**  
-`extractAnswers(questions, reply)` — sends the participant's reply to Claude with structured output instructions and returns `[{ questionId, answer | null }]`.
+**Architecture — same interface + adapter + factory pattern as SMS:**
 
-**Why Claude for extraction:**  
-Participants reply in natural language — not structured answers. Claude maps free text to the right questions using context, not keyword matching.
+The rest of the app never references Anthropic directly. It only calls methods on `IAiProvider`. Adding OpenAI or any other provider = one new file in `providers/` + one case in the factory.
 
-**Prompt:**  
 ```
-You are extracting answers from an SMS reply sent by a hotel property manager.
-
-Questions asked:
-{{numberedQuestionList}}
-
-Participant reply:
-"{{reply}}"
-
-Return JSON: { "answers": [{ "questionId": n, "answer": "string or null" }] }
-Rules: match by number or context; null if missing or unclear; never invent.
+broadcast.service.ts
+conversation.worker.ts  →  IAiProvider  →  AnthropicProvider  (today)
+                                        →  OpenAiProvider      (future)
 ```
+
+**`ai.provider.interface.ts` — the contract:**
+```typescript
+export interface IAiProvider {
+  generateMessage(params: {
+    questions: string[]
+    maxLength: number
+    previousAttempt?: string  // if set: "this was too long, shorten it"
+  }): Promise<string>
+
+  extractAnswers(params: {
+    questions: string[]
+    messages: { role: 'ai' | 'participant', body: string }[]
+  }): Promise<{
+    answers: { questionIndex: number, answer: string | null, confident: boolean }[]
+    followUp: string | null  // null = all answered; string = send this and await next reply
+  }>
+}
+```
+
+**`generateMessage` — what the AI produces:**  
+A friendly, natural SMS that includes all questions — written as if the manager sent it personally, not as a system message. No names, no greetings formula — just a warm, conversational tone that fits an SMS from a colleague.
+
+**`extractAnswers` — how it works:**  
+The AI receives the full conversation history + the question list. It returns a confident answer or `null` per question, and a `followUp` message if any answers are still missing or unclear. The follow-up freely rephrases only the unanswered questions — not a copy-paste of the originals.
 
 **Why `null` instead of guessing:**  
-If Claude isn't confident, it returns `null` for that question. We don't store the Answer row. This means the manager sees which questions went unanswered, not fabricated answers. The conversation stays open for the next cycle.
+If the AI isn't confident, it returns `null` for that question. We don't store the Answer row. The manager sees which questions went unanswered, not fabricated answers.
 
-**SDK usage:**
+**Conversation loop (driven by `extractAnswers`):**
+- All `confident: true` + `followUp: null` → save answers → Conversation `completed`
+- Any unanswered + `followUp: string` → send follow-up → await next reply → call `extractAnswers` again
+- No separate limit on follow-up rounds — the loop runs until complete or `CONVERSATION_STUCK_TIMEOUT_MINUTES` expires
+
+**`ai.factory.ts` — provider selection:**
 ```typescript
-const response = await anthropic.messages.create({
-  model: 'claude-sonnet-4-6',
-  max_tokens: 1024,
-  messages: [{ role: 'user', content: prompt }],
-})
-// parse JSON from response.content[0].text
+export function createAiProvider(): IAiProvider {
+  const provider = config.ai?.provider ?? 'anthropic'
+  switch (provider) {
+    case 'anthropic': return new AnthropicProvider(config.ai!)
+    // future: case 'openai': return new OpenAiProvider(config.ai!)
+    default: throw new Error(`Unknown AI_PROVIDER: "${provider}"`)
+  }
+}
 ```
+
+**Config changes (in `config.ts`):**
+- Add `AI_PROVIDER` env var (default: `anthropic`)
+- Replace the current `anthropic: { apiKey }` block with a generic `ai` block:
+```typescript
+ai: z.object({
+  provider: z.enum(['anthropic', 'openai']).default('anthropic'),
+  apiKey:   z.string().min(1),
+}).nullable().default(null)
+```
+- Same nullable pattern as Twilio — app starts without it, AI features disabled until set.
 
 ---
 
@@ -755,11 +784,14 @@ const response = await anthropic.messages.create({
 1. Skip if `smsOptedOut = true` → log skip.
 2. Skip if `phone = null` → log skip (participant has no phone yet).
 3. Supersede any open Conversation for this participant (set `status = superseded`, `failReason = SUPERSEDED_BY_NEW_BROADCAST`).
-4. Build SMS bundle → enforce length (throws `SmsTooLongError` if over limit).
-5. Create `Conversation` (`status = awaiting_reply`, `lastMessageAt = now`).
-6. Call `sendSms` → get message ID.
-7. Save `Message` (`role = ai`, `twilioSid = messageId`).
-8. If `SmsTooLongError`: set Conversation `status = failed`, `failReason = SMS_TOO_LONG`, Sentry alert — continue loop for other participants.
+4. Call `aiProvider.generateMessage({ questions, maxLength })` → get friendly SMS body. The prompt includes the character limit so the AI targets it from the first attempt.
+5. Call `validateMessageLength(body)` → if too long, retry: call `aiProvider.generateMessage({ questions, maxLength, previousAttempt: body })` → AI shortens it. Max 2 retries.
+6. Create `Conversation` (`status = awaiting_reply`, `lastMessageAt = now`).
+7. Call `smsProvider.sendSms` → get message ID.
+8. Save `Message` (`role = ai`, `twilioSid = messageId`).
+9. If still too long after retries → `SmsTooLongError`: set Conversation `status = failed`, `failReason = SMS_TOO_LONG` — continue loop for other participants.
+
+> ⚠️ **Open question:** if the message is still too long after max retries (e.g. 10 very long questions that genuinely can't fit), should we fail only this Conversation and continue the broadcast, or fail the entire Broadcast and alert the admin? Deferred — decide before implementing Step 16.
 
 **After loop:**  
 Check if all Conversations are in terminal state (all failed for e.g. all opted-out) → set Broadcast `status = completed`.
