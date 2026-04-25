@@ -69,7 +69,7 @@ export async function authRoutes(app: FastifyInstance) {
           ...(config.twilio && { fromNumber: maskPhone(config.twilio.fromNumber) }),
         },
         anthropic: {
-          configured: !!config.anthropic.apiKey,
+          configured: !!config.anthropic,
         },
       })
     }

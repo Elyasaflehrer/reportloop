@@ -189,6 +189,27 @@ ALTER TABLE messages             ENABLE ROW LEVEL SECURITY;
 ALTER TABLE answers              ENABLE ROW LEVEL SECURITY;
 ALTER TABLE inbound_audit_logs   ENABLE ROW LEVEL SECURITY;
 
+-- ─── AUTH SYNC TRIGGER ───────────────────────────────────────────────────────
+-- Fires when a user signs in via OAuth (Google, Microsoft, etc.) for the first time.
+-- Matches the Supabase auth user to a pre-registered row in public.users by email.
+-- If the email was not pre-registered by an admin → supabase_id stays NULL →
+-- authenticate middleware returns 401. No self-registration is possible.
+CREATE OR REPLACE FUNCTION handle_new_user()
+RETURNS TRIGGER LANGUAGE plpgsql SECURITY DEFINER AS $$
+BEGIN
+  UPDATE public.users
+  SET supabase_id = NEW.id::TEXT
+  WHERE email = NEW.email
+    AND supabase_id IS NULL
+    AND deleted_at IS NULL;
+  RETURN NEW;
+END;
+$$;
+
+CREATE TRIGGER on_auth_user_created
+  AFTER INSERT ON auth.users
+  FOR EACH ROW EXECUTE FUNCTION handle_new_user();
+
 -- ─── TEST USER SETUP ─────────────────────────────────────────────────────────
 -- After creating your user in Supabase dashboard (Authentication → Users → Add user),
 -- run this to set their role so the frontend knows what to show on login.

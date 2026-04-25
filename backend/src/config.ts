@@ -33,9 +33,10 @@ const schema = z.object({
     fromNumber: z.string().min(1),
   }).nullable().default(null),
 
+  // Optional — required only when AI answer extraction is used (Phase 3).
   anthropic: z.object({
     apiKey: z.string().min(1),
-  }),
+  }).nullable().default(null),
 
   sms: z.object({
     maxLength: z.coerce.number().default(459),
@@ -91,9 +92,9 @@ export const config = schema.parse({
     fromNumber: process.env.TWILIO_FROM_NUMBER,
   } : null,
 
-  anthropic: {
-    apiKey: process.env.ANTHROPIC_API_KEY,
-  },
+  anthropic: process.env.ANTHROPIC_API_KEY
+    ? { apiKey: process.env.ANTHROPIC_API_KEY }
+    : null,
 
   sms: {
     maxLength: process.env.SMS_MAX_LENGTH,

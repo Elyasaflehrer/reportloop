@@ -544,10 +544,23 @@ Goal: all data management endpoints working with proper auth, validation, pagina
 **Why this order:**  
 Read before write — we verify the DB integration and pagination work before testing mutations.
 
+**Login flow — Google OAuth (closed platform):**
+1. Admin creates user via `POST /users` → inserts into `public.users` with email + role. No Supabase auth account is created yet.
+2. Admin notifies the user (outside the system).
+3. User goes to the platform → clicks "Sign in with Google" → Google OAuth → Supabase creates `auth.users` automatically.
+4. `handle_new_user` trigger fires → matches by email → populates `supabase_id` on the existing `public.users` row.
+5. User is authenticated. `GET /auth/me` returns their role and scope.
+
+**Gate — only pre-registered users can log in:**
+If a Google account's email was never added by an admin, the trigger finds no match → `supabase_id` stays NULL → `authenticate` middleware returns 401. No self-registration is possible.
+
+**Additional providers:**
+Supabase supports Google, Microsoft (Azure AD), and others — all enabled via the Supabase dashboard, no code changes required. Start with Google. Add Microsoft if a client uses Microsoft 365.
+
 **Key details:**
 - All list endpoints support `?page=1&limit=50` + filters (`role`, `groupId`, `active`, `search`). Max `limit` capped at 100 server-side.
-- `POST /users` creates a Supabase Auth user (via Admin API) + inserts into our `User` table in a single operation. If Supabase succeeds but DB insert fails, we delete the Supabase user (compensating transaction).
-- `DELETE /users/:id` soft-deactivates by default (`active=false`), not hard delete — open decision from `backend_plan.md` §22.
+- `POST /users` only inserts into `public.users` — no Supabase Admin API call needed. The OAuth flow handles account creation automatically.
+- `DELETE /users/:id` soft-deactivates (`active=false`, `deleted_at = now()`). The next `authenticate` call for this user returns 401.
 - Zod schema validates every request body before it touches the DB.
 
 ---
