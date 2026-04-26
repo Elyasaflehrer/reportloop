@@ -121,20 +121,42 @@ const SessionProvider = ({ children }) => {
   const [loading, setLoading] = React.useState(true);
   const [needsPasswordReset, setNeedsPasswordReset] = React.useState(false);
 
+  const hydrateSession = React.useCallback(async (sb) => {
+    if (!sb) { setSession(null); return; }
+    const base = mapSupabaseSession(sb);
+    try {
+      const res = await fetch(`${API_BASE_URL}/auth/me`, {
+        headers: { Authorization: `Bearer ${sb.access_token}` },
+      });
+      if (res.ok) {
+        const { user, scope } = await res.json();
+        setSession({
+          ...base,
+          role:              user.role,
+          name:              user.name || base.name,
+          viewerManagerIds:  scope?.viewableManagerIds ?? [],
+          activeManagerId:   (scope?.viewableManagerIds ?? [])[0] ?? null,
+        });
+        return;
+      }
+    } catch (err) {
+      console.error('[session] /auth/me failed, falling back to JWT role:', err);
+    }
+    setSession(base);
+  }, []);
+
   React.useEffect(() => {
     if (!supabaseClient) { setLoading(false); return; }
     supabaseClient.auth.getSession()
-      .then(({ data: { session: sb } }) => {
-        setSession(sb ? mapSupabaseSession(sb) : null);
-      })
+      .then(({ data: { session: sb } }) => hydrateSession(sb))
       .catch((err) => console.error("getSession failed:", err))
       .finally(() => setLoading(false));
     const { data: { subscription } } = supabaseClient.auth.onAuthStateChange((event, sb) => {
       if (event === 'PASSWORD_RECOVERY') setNeedsPasswordReset(true);
-      setSession(sb ? mapSupabaseSession(sb) : null);
+      hydrateSession(sb);
     });
     return () => subscription.unsubscribe();
-  }, []);
+  }, [hydrateSession]);
 
   const login = async ({ email, password }) => {
     if (!supabaseClient) throw new Error("Supabase is not configured.");
@@ -151,9 +173,10 @@ const SessionProvider = ({ children }) => {
     setSession((cur) => cur ? { ...cur, activeManagerId: mid } : cur);
   };
 
-  const refreshViewerSessionFromGroups = React.useCallback(() => {
-    // No-op until GET /auth/me is wired up in Phase 5.
-  }, []);
+  const refreshViewerSessionFromGroups = React.useCallback(async () => {
+    const { data: { session: sb } } = await supabaseClient.auth.getSession();
+    if (sb) await hydrateSession(sb);
+  }, [hydrateSession]);
 
   if (loading) {
     return (
