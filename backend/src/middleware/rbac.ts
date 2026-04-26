@@ -33,18 +33,29 @@ export async function authenticate(req: FastifyRequest, reply: FastifyReply) {
   const { data: { user: supabaseUser }, error } = await supabaseAdmin.auth.getUser(token)
 
   if (error || !supabaseUser) {
-    console.error('[auth] supabaseAdmin.auth.getUser failed:', error)
     return reply.status(401).send({ error: { code: 'UNAUTHORIZED', message: 'Invalid or expired token' } })
   }
 
-  const user = await prisma.user.findFirst({
-    where: {
-      supabaseId: supabaseUser.id,
-      active:     true,
-      deletedAt:  null,
-    },
+  // Primary lookup: fast path for users with a linked supabase_id
+  let user = await prisma.user.findFirst({
+    where: { supabaseId: supabaseUser.id, active: true, deletedAt: null },
     select: { id: true, supabaseId: true, name: true, email: true, role: true },
   })
+
+  // First-login auto-link: covers invited users whose supabase_id wasn't linked yet
+  if (!user && supabaseUser.email) {
+    const unlinked = await prisma.user.findFirst({
+      where: { email: supabaseUser.email, supabaseId: null, active: true, deletedAt: null },
+      select: { id: true, name: true, email: true, role: true },
+    })
+    if (unlinked) {
+      user = await prisma.user.update({
+        where:  { id: unlinked.id },
+        data:   { supabaseId: supabaseUser.id },
+        select: { id: true, supabaseId: true, name: true, email: true, role: true },
+      }) as typeof user
+    }
+  }
 
   if (!user) {
     return reply.status(401).send({ error: { code: 'UNAUTHORIZED', message: 'User not found or inactive' } })
