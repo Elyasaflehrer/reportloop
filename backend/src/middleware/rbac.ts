@@ -1,8 +1,7 @@
 import { type FastifyRequest, type FastifyReply } from 'fastify'
-import jwt from 'jsonwebtoken'
 import { type UserRole } from '@prisma/client'
-import { config } from '../config.js'
 import { prisma } from '../db.js'
+import { supabaseAdmin } from '../supabase.js'
 
 // ─── REQUEST AUGMENTATION ────────────────────────────────────────────────────
 
@@ -31,24 +30,18 @@ export async function authenticate(req: FastifyRequest, reply: FastifyReply) {
 
   const token = header.slice(7)
 
-  let payload: jwt.JwtPayload
+  const { data: { user: supabaseUser }, error } = await supabaseAdmin.auth.getUser(token)
 
-  try {
-    payload = jwt.verify(token, config.supabase.jwtSecret) as jwt.JwtPayload
-  } catch {
+  if (error || !supabaseUser) {
+    console.error('[auth] supabaseAdmin.auth.getUser failed:', error)
     return reply.status(401).send({ error: { code: 'UNAUTHORIZED', message: 'Invalid or expired token' } })
-  }
-
-  const supabaseId = payload.sub
-  if (!supabaseId) {
-    return reply.status(401).send({ error: { code: 'UNAUTHORIZED', message: 'Invalid token payload' } })
   }
 
   const user = await prisma.user.findFirst({
     where: {
-      supabaseId,
-      active:    true,
-      deletedAt: null,
+      supabaseId: supabaseUser.id,
+      active:     true,
+      deletedAt:  null,
     },
     select: { id: true, supabaseId: true, name: true, email: true, role: true },
   })
