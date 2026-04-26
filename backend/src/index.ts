@@ -6,6 +6,7 @@ import { startBroadcastWorker } from './jobs/broadcast.worker.js'
 import { startConversationWorker } from './jobs/conversation.worker.js'
 import { startScheduler } from './jobs/scheduler.js'
 import { startReminderWorker } from './jobs/reminder.worker.js'
+import { startCleanupWorker } from './jobs/cleanup.worker.js'
 import { createSmsProvider } from './services/sms/sms.factory.js'
 
 async function start() {
@@ -34,7 +35,8 @@ async function start() {
     app.log.warn('[workers] reminder worker skipped — Twilio not configured')
   }
 
-  const scheduler = startScheduler()
+  const scheduler     = startScheduler()
+  const cleanupWorker = startCleanupWorker()
 
   // ─── GRACEFUL SHUTDOWN ────────────────────────────────────────────────────
 
@@ -48,6 +50,7 @@ async function start() {
       if (conversationWorker) await conversationWorker.close()
       if (reminderWorker)     reminderWorker.stop()
       scheduler.stop()
+      cleanupWorker.stop()
 
       await prisma.$disconnect()
 
