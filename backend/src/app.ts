@@ -10,6 +10,9 @@ import { groupsRoutes } from './routes/groups.js'
 import { participantsRoutes } from './routes/participants.js'
 import { questionsRoutes } from './routes/questions.js'
 import { schedulesRoutes } from './routes/schedules.js'
+import { webhooksRoutes } from './routes/webhooks.js'
+import { createSmsProvider } from './services/sms/sms.factory.js'
+import type { ISmsProvider } from './services/sms/sms.provider.interface.js'
 
 export async function buildApp(): Promise<FastifyInstance> {
   const app = Fastify({
@@ -73,11 +76,13 @@ export async function buildApp(): Promise<FastifyInstance> {
   await app.register(participantsRoutes)
   await app.register(questionsRoutes)
   await app.register(schedulesRoutes)
-  // Step 13: SMS provider abstraction
-  // Step 10: groups
-  // Step 11: participants
-  // Step 12: questions, schedules
-  // Step 20: webhooks
+
+  if (config.twilio) {
+    const smsProvider: ISmsProvider = createSmsProvider()
+    await app.register(webhooksRoutes, { smsProvider })
+  }
+
+  // Step 21: conversation worker
 
   return app
 }
