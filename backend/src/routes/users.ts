@@ -170,11 +170,18 @@ export async function usersRoutes(app: FastifyInstance) {
       // Send invite email so the user can set their own password.
       // Participants have no platform account — skip.
       if (email && role !== 'participant') {
-        const { error: inviteError } = await supabaseAdmin.auth.admin.inviteUserByEmail(email, {
+        const { data: inviteData, error: inviteError } = await supabaseAdmin.auth.admin.inviteUserByEmail(email, {
           redirectTo: config.app.frontendOrigin,
+          data: { name, role },
         })
         if (inviteError) {
           req.log.warn({ err: inviteError, userId: user.id }, '[users] invite email failed — user created but not invited')
+        } else if (inviteData?.user?.id) {
+          // Link supabase_id immediately so the user can log in right after accepting the invite
+          await prisma.user.update({
+            where: { id: user.id },
+            data:  { supabaseId: inviteData.user.id },
+          })
         }
       }
 
@@ -230,18 +237,30 @@ export async function usersRoutes(app: FastifyInstance) {
         where: { id: userId },
         data:  body.data,
         select: {
-          id:        true,
-          name:      true,
-          email:     true,
-          phone:     true,
-          initials:  true,
-          title:     true,
-          role:      true,
-          active:    true,
-          updatedAt: true,
+          id:          true,
+          supabaseId:  true,
+          name:        true,
+          email:       true,
+          phone:       true,
+          initials:    true,
+          title:       true,
+          role:        true,
+          active:      true,
+          updatedAt:   true,
         },
       })
-      return reply.send(user)
+
+      // Keep Supabase user_metadata in sync so the JWT reflects the new role/name
+      if (user.supabaseId && (body.data.role || body.data.name)) {
+        const metadata: Record<string, unknown> = {}
+        if (body.data.role) metadata.role = user.role
+        if (body.data.name) metadata.name = user.name
+        await supabaseAdmin.auth.admin.updateUserById(user.supabaseId, { user_metadata: metadata })
+          .catch(err => req.log.warn({ err, userId }, '[users] failed to sync user_metadata to Supabase'))
+      }
+
+      const { supabaseId: _, ...rest } = user
+      return reply.send(rest)
     } catch (err: any) {
       if (err.code === 'P2002') {
         const field = err.meta?.target?.[0] ?? 'field'
