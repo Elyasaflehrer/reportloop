@@ -18,10 +18,10 @@
 | Phase | Status |
 |---|---|
 | Phase 0 — Frontend Audit & Cleanup | ✅ Complete |
-| Phase 1 — Foundation | 🔲 Next |
-| Phase 2 — CRUD APIs | 🔲 Not started |
-| Phase 3 — Broadcast Engine | 🔲 Not started |
-| Phase 4 — Webhooks & Conversations | 🔲 Not started |
+| Phase 1 — Foundation | ✅ Complete |
+| Phase 2 — CRUD APIs | ✅ Complete |
+| Phase 3 — Broadcast Engine | ✅ Complete |
+| Phase 4 — Webhooks & Conversations | ✅ Complete |
 | Phase 5 — Frontend Cutover | 🔲 Not started |
 | Phase 6 — Production Hardening | 🔲 Not started |
 
@@ -499,6 +499,19 @@ Uses `SUPABASE_JWT_SECRET` with the `jsonwebtoken` library — no Supabase SDK c
 
 **File:** `backend/src/routes/auth.ts`
 
+**Note — Supabase Admin client:**
+The invite flow in `POST /users` (Step 9) requires the Supabase Admin client, which uses `SUPABASE_SERVICE_ROLE_KEY` (already in config). Initialize it once in a shared file (e.g. `src/supabase.ts`):
+```typescript
+import { createClient } from '@supabase/supabase-js'
+import { config } from './config.js'
+
+export const supabaseAdmin = createClient(
+  config.supabase.url,
+  config.supabase.serviceRoleKey,
+)
+```
+This client bypasses RLS and is used server-side only — never exposed to the browser.
+
 **What:**  
 - `GET /auth/me` — returns the current user's profile + their server-derived scope (role, group IDs, manager partition IDs if viewer).
 - `POST /auth/logout` — calls Supabase Admin API to revoke the session token.
@@ -544,18 +557,19 @@ Goal: all data management endpoints working with proper auth, validation, pagina
 **Why this order:**  
 Read before write — we verify the DB integration and pagination work before testing mutations.
 
-**Login flow — Google OAuth (closed platform):**
-1. Admin creates user via `POST /users` → inserts into `public.users` with email + role. No Supabase auth account is created yet.
-2. Admin notifies the user (outside the system).
-3. User goes to the platform → clicks "Sign in with Google" → Google OAuth → Supabase creates `auth.users` automatically.
-4. `handle_new_user` trigger fires → matches by email → populates `supabase_id` on the existing `public.users` row.
-5. User is authenticated. `GET /auth/me` returns their role and scope.
+**Login flow — email invite (closed platform):**
+1. Admin creates user via `POST /users` → inserts into `public.users` with email + role.
+2. Backend calls `supabaseAdmin.auth.admin.inviteUserByEmail(email, { redirectTo: config.app.frontendOrigin })` → Supabase sends an invite email to the user.
+3. User clicks the link in the email → lands on the frontend → sees "Set new password" form (`ResetPasswordForm` — already implemented in the frontend).
+4. User sets their password → Supabase creates `auth.users` entry automatically.
+5. `handle_new_user` DB trigger fires → matches by email → populates `supabase_id` on the existing `public.users` row.
+6. User can now sign in with email + password. `GET /auth/me` returns their role and scope.
 
 **Gate — only pre-registered users can log in:**
-If a Google account's email was never added by an admin, the trigger finds no match → `supabase_id` stays NULL → `authenticate` middleware returns 401. No self-registration is possible.
+If an email was never added by an admin, there is no `public.users` row → `authenticate` middleware returns 401. No self-registration is possible.
 
-**Additional providers:**
-Supabase supports Google, Microsoft (Azure AD), and others — all enabled via the Supabase dashboard, no code changes required. Start with Google. Add Microsoft if a client uses Microsoft 365.
+**Resend invite:**
+Add `POST /users/:id/resend-invite` (admin only) → calls `supabaseAdmin.auth.admin.inviteUserByEmail(email)` again. Supabase re-sends the invite email.
 
 **Key details:**
 - All list endpoints support `?page=1&limit=50` + filters (`role`, `groupId`, `active`, `search`). Max `limit` capped at 100 server-side.

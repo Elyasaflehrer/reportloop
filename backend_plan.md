@@ -11,7 +11,7 @@
 - Access scope derived at query time via joins — never stored
 - No secrets in browser, localStorage, or DB
 - Twilio is platform-wide (one account, one number, env vars only)
-- **Auth (canonical path):** browser signs in via Supabase JS client; API receives `Authorization: Bearer <jwt>`; server verifies JWT using `SUPABASE_JWT_SECRET` — server never handles passwords. Supports email + future SSO (Google, Microsoft, SAML) with no backend changes.
+- **Auth (canonical path):** browser signs in via Supabase JS client (`signInWithPassword`); API receives `Authorization: Bearer <jwt>`; server verifies JWT using `SUPABASE_JWT_SECRET` — server never handles passwords. New users are provisioned by admin via `POST /users` → backend calls Supabase Admin API (`inviteUserByEmail`) → user receives invite email → sets own password. Google/Microsoft SSO deferred to v2.
 - Never trust `role` or scope from client request payload — always resolve from DB via JWT subject
 
 ---
@@ -702,6 +702,7 @@ Rules: `const USE_API = false` flag, flip per domain. JWT in memory only. Every 
 
 ### Phase 2 — CRUD APIs
 - [ ] Users, Groups, GroupMembers, ManagerGroups, Employees CRUD
+- [ ] `POST /users` calls `supabase.auth.admin.inviteUserByEmail(email)` → user receives invite email to set their own password
 - [ ] Questions + Schedules CRUD (with sub-tables, SMS length pre-validation)
 - [ ] Consistent error shape on all routes; pagination on all lists
 
