@@ -37,7 +37,7 @@ const updateScheduleBody = z.object({
 
 const listQuery = z.object({
   page:   z.coerce.number().int().min(1).default(1),
-  limit:  z.coerce.number().int().min(1).max(100).default(50),
+  limit:  z.coerce.number().int().min(1).max(500).default(50),
   active: z.enum(['true', 'false']).optional(),
 })
 
@@ -85,16 +85,21 @@ export async function schedulesRoutes(app: FastifyInstance) {
           managerId:     true,
           createdAt:     true,
           updatedAt:     true,
-          _count: {
-            select: { scheduleQuestions: true, scheduleRecipients: true },
-          },
+          scheduleQuestions:  { select: { questionId: true } },
+          scheduleRecipients: { select: { userId:     true } },
         },
       }),
       prisma.schedule.count({ where }),
     ])
 
     return reply.send({
-      data: schedules,
+      data: schedules.map(s => ({
+        ...s,
+        questionIds:        s.scheduleQuestions.map(q => q.questionId),
+        employeeIds:        s.scheduleRecipients.map(r => r.userId),
+        scheduleQuestions:  undefined,
+        scheduleRecipients: undefined,
+      })),
       meta: { total, page, limit, pages: Math.ceil(total / limit) },
     })
   })

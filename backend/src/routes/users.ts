@@ -2,6 +2,8 @@ import { type FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { prisma } from '../db.js'
 import { authenticate, requireRole } from '../middleware/rbac.js'
+import { supabaseAdmin } from '../supabase.js'
+import { config } from '../config.js'
 
 // ─── Validation schemas ───────────────────────────────────────────────────────
 
@@ -28,7 +30,7 @@ const updateUserBody = z.object({
 
 const listUsersQuery = z.object({
   page:    z.coerce.number().int().min(1).default(1),
-  limit:   z.coerce.number().int().min(1).max(100).default(50),
+  limit:   z.coerce.number().int().min(1).max(500).default(50),
   role:    z.enum(roleValues).optional(),
   active:  z.enum(['true', 'false']).optional(),
   groupId: z.coerce.number().int().optional(),
@@ -164,6 +166,18 @@ export async function usersRoutes(app: FastifyInstance) {
           createdAt: true,
         },
       })
+
+      // Send invite email so the user can set their own password.
+      // Participants have no platform account — skip.
+      if (email && role !== 'participant') {
+        const { error: inviteError } = await supabaseAdmin.auth.admin.inviteUserByEmail(email, {
+          redirectTo: config.app.frontendOrigin,
+        })
+        if (inviteError) {
+          req.log.warn({ err: inviteError, userId: user.id }, '[users] invite email failed — user created but not invited')
+        }
+      }
+
       return reply.status(201).send(user)
     } catch (err: any) {
       if (err.code === 'P2002') {
@@ -172,6 +186,30 @@ export async function usersRoutes(app: FastifyInstance) {
       }
       throw err
     }
+  })
+
+  // ─── POST /users/:id/resend-invite ────────────────────────────────────────
+
+  app.post('/users/:id/resend-invite', { preHandler: [authenticate, requireRole('admin')] }, async (req, reply) => {
+    const { id } = req.params as { id: string }
+    const userId = parseInt(id, 10)
+    if (isNaN(userId)) return reply.status(400).send({ error: 'Invalid user id' })
+
+    const user = await prisma.user.findFirst({ where: { id: userId, deletedAt: null } })
+    if (!user)        return reply.status(404).send({ error: 'User not found' })
+    if (!user.email)  return reply.status(400).send({ error: 'User has no email address' })
+    if (user.role === 'participant') return reply.status(400).send({ error: 'Participants do not have platform accounts' })
+
+    const { error: inviteError } = await supabaseAdmin.auth.admin.inviteUserByEmail(user.email, {
+      redirectTo: config.app.frontendOrigin,
+    })
+
+    if (inviteError) {
+      req.log.warn({ err: inviteError, userId }, '[users] resend invite failed')
+      return reply.status(422).send({ error: inviteError.message })
+    }
+
+    return reply.status(204).send()
   })
 
   // ─── PATCH /users/:id ──────────────────────────────────────────────────────

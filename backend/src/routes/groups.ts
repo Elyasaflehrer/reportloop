@@ -25,7 +25,7 @@ const managerBody = z.object({
 
 const listGroupsQuery = z.object({
   page:   z.coerce.number().int().min(1).default(1),
-  limit:  z.coerce.number().int().min(1).max(100).default(50),
+  limit:  z.coerce.number().int().min(1).max(500).default(50),
   search: z.string().optional(),
 })
 
@@ -65,6 +65,7 @@ export async function groupsRoutes(app: FastifyInstance) {
           description: true,
           createdAt:   true,
           updatedAt:   true,
+          members:     { select: { userId: true } },
           _count: {
             select: { members: true, managerLinks: true },
           },
@@ -74,7 +75,11 @@ export async function groupsRoutes(app: FastifyInstance) {
     ])
 
     return reply.send({
-      data: groups,
+      data: groups.map(g => ({
+        ...g,
+        memberIds: g.members.map((m: { userId: number }) => m.userId),
+        members:   undefined,
+      })),
       meta: { total, page, limit, pages: Math.ceil(total / limit) },
     })
   })
@@ -269,6 +274,15 @@ export async function groupsRoutes(app: FastifyInstance) {
     })
 
     return reply.status(204).send()
+  })
+
+  // ─── GET /manager-groups ──────────────────────────────────────────────────
+
+  app.get('/manager-groups', { preHandler: [authenticate, requireRole('admin')] }, async (_req, reply) => {
+    const links = await prisma.managerGroup.findMany({
+      select: { managerId: true, groupId: true },
+    })
+    return reply.send({ data: links })
   })
 
   // ─── GET /admin/setup-status ───────────────────────────────────────────────
