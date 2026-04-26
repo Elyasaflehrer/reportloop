@@ -76,6 +76,11 @@
   <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+    <script>                                                                                                                                                                      
+    var SUPABASE_URL      = 'https://fwqdjyjabhojqdiyolul.supabase.co';
+    var SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZ3cWRqeWphYmhvanFkaXlvbHVsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzY2MjI5MzcsImV4cCI6MjA5MjE5ODkzN30.2r78k2ttVvdRQ7KL0gPDAFOsiGOmaS1F2uhXvmFrV08';
+    var API_BASE_URL      = 'http://localhost:3000';
+  </script>  
   <!-- Order: session → data → shared UI → screens (View Log lives in 06-History) → shell last -->
   <script type="text/babel" data-presets="react">
 /* source: app/00-session.jsx */
@@ -114,6 +119,7 @@ const mapSupabaseSession = (sb) => ({
 const SessionProvider = ({ children }) => {
   const [session, setSession] = React.useState(null);
   const [loading, setLoading] = React.useState(true);
+  const [needsPasswordReset, setNeedsPasswordReset] = React.useState(false);
 
   React.useEffect(() => {
     if (!supabaseClient) { setLoading(false); return; }
@@ -123,7 +129,8 @@ const SessionProvider = ({ children }) => {
       })
       .catch((err) => console.error("getSession failed:", err))
       .finally(() => setLoading(false));
-    const { data: { subscription } } = supabaseClient.auth.onAuthStateChange((_event, sb) => {
+    const { data: { subscription } } = supabaseClient.auth.onAuthStateChange((event, sb) => {
+      if (event === 'PASSWORD_RECOVERY') setNeedsPasswordReset(true);
       setSession(sb ? mapSupabaseSession(sb) : null);
     });
     return () => subscription.unsubscribe();
@@ -164,6 +171,8 @@ const SessionProvider = ({ children }) => {
       setViewerManager,
       refreshViewerSessionFromGroups,
       activeManagerId: session?.role === "viewer" ? session.activeManagerId : null,
+      needsPasswordReset,
+      setNeedsPasswordReset,
     }}>
       {children}
     </SessionContext.Provider>
@@ -174,38 +183,102 @@ const SessionProvider = ({ children }) => {
   <script type="text/babel" data-presets="react">
 /* source: app/01-data.jsx */
 // Flip true per domain as each API endpoint is verified in Phase 5.
-const USE_API = false;
-
-// Data layer stubs — replaced with real API calls in Phase 5 (USE_API flipped true per domain).
-
 const { useState, useEffect, useRef, useCallback } = React;
 
-// ─── API STUBS ────────────────────────────────────────────────────────────────
-// Return empty data until backend endpoints are wired up. One-line swap in Phase 5.
+// ─── API CLIENT ───────────────────────────────────────────────────────────────
 
-const loadPlatformUsers = () => [];
-const savePlatformUsers = () => {};
+const apiFetch = async (path, token, { method = 'GET', body } = {}) => {
+  const res = await fetch(`${API_BASE_URL}${path}`, {
+    method,
+    headers: {
+      'Content-Type': 'application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+    ...(body != null ? { body: JSON.stringify(body) } : {}),
+  });
+  if (res.status === 204) return null;
+  const data = await res.json();
+  if (!res.ok) throw new Error(data?.error?.message || data?.message || `Request failed ${res.status}`);
+  return data;
+};
 
-const loadGroups = () => [];
-const saveGroups = () => {};
+// ─── APP DATA CONTEXT ─────────────────────────────────────────────────────────
+// Loads platform-wide data once on login and shares it across all admin screens.
 
-const loadGroupMembers = () => [];
-const saveGroupMembers = () => {};
+const AppDataContext = React.createContext(null);
+const useAppData = () => React.useContext(AppDataContext);
 
-const loadManagerGroups = () => [];
-const saveManagerGroups = () => {};
+const AppDataProvider = ({ children }) => {
+  const { session } = useSession();
+  const token = session?.accessToken ?? null;
+  const isAdmin = session?.role === 'admin';
 
-const loadEmployeeManagers = () => ({});
-const saveEmployeeManagers = () => {};
+  const [users,         setUsers]         = React.useState([]);
+  const [groups,        setGroups]        = React.useState([]);
+  const [managerGroups, setManagerGroups] = React.useState([]);
+  const [participants,  setParticipants]  = React.useState([]);
+  const [questions,     setQuestions]     = React.useState([]);
+  const [schedules,     setSchedules]     = React.useState([]);
+  const [dataLoading,   setDataLoading]   = React.useState(false);
 
-const loadManagerQuestions = () => ({});
-const saveManagerQuestions = () => {};
+  const loadAll = useCallback(async () => {
+    if (!token) return;
+    setDataLoading(true);
+    try {
+      const fetches = [
+        apiFetch('/groups?limit=500', token),
+        apiFetch('/participants?limit=500', token),
+        apiFetch('/questions?limit=500', token),
+        apiFetch('/schedules?limit=500', token),
+      ];
+      if (isAdmin) {
+        fetches.push(
+          apiFetch('/users?limit=500', token),
+          apiFetch('/manager-groups', token),
+        );
+      }
+      const [groupsRes, participantsRes, questionsRes, schedulesRes, usersRes, mgRes] = await Promise.all(fetches);
+      setGroups(groupsRes?.data        || []);
+      setParticipants(participantsRes?.data || []);
+      setQuestions(questionsRes?.data   || []);
+      setSchedules(schedulesRes?.data   || []);
+      if (isAdmin) {
+        setUsers(usersRes?.data         || []);
+        setManagerGroups(mgRes?.data    || []);
+      }
+    } catch (err) {
+      console.error('[AppData] load failed:', err);
+    } finally {
+      setDataLoading(false);
+    }
+  }, [token, isAdmin]);
 
-const loadManagerSchedules = () => ({});
-const saveManagerSchedules = () => {};
+  useEffect(() => { loadAll(); }, [loadAll]);
 
+  return (
+    <AppDataContext.Provider value={{
+      users, groups, managerGroups, participants, questions, schedules,
+      dataLoading, refresh: loadAll, token,
+    }}>
+      {children}
+    </AppDataContext.Provider>
+  );
+};
+
+// ─── LEGACY STUBS (unused after Phase 5 wiring) ───────────────────────────────
+const loadPlatformUsers           = () => [];
+const loadGroups                  = () => [];
+const loadGroupMembers            = () => [];
+const loadManagerGroups           = () => [];
+const loadManagerQuestions        = () => ({});
+const loadManagerSchedules        = () => ({});
+const saveGroups                  = () => {};
+const saveGroupMembers            = () => {};
+const saveManagerGroups           = () => {};
+const saveManagerQuestions        = () => {};
+const saveManagerSchedules        = () => {};
 const getEmployeeManagerId = () => null;
-const employeesForManager = () => [];
+const employeesForManager  = () => [];
 const employeeInManagerRoster = () => false;
 const getViewerManagerPartitionIdsFromGroups = () => [];
 
@@ -2251,12 +2324,16 @@ const QuestionHistoryTab = () => {
 // Admin dashboard (RBAC plan): users, groups, roster, all correspondences. Tweaks at bottom.
 
 const AdminDashboard = ({ onNav }) => {
+  const { users, groups, managerGroups } = useAppData();
   const [tab, setTab] = useState("users");
-  const groupsCount = loadGroups().length;
-  const managerGroupLinksCount = loadManagerGroups().length;
-  const userGroupMembershipsCount = loadGroupMembers().filter((m) => m.userId != null && m.employeeId == null).length;
-  const viewers = loadPlatformUsers().filter((u) => u.role === "viewer");
-  const viewersWithCoverage = viewers.filter((u) => getViewerManagerPartitionIdsFromGroups(u.id).length > 0).length;
+  const groupsCount = groups.length;
+  const managerGroupLinksCount = managerGroups.length;
+  const userGroupMembershipsCount = groups.reduce((acc, g) => acc + (g.memberIds || []).length, 0);
+  const viewers = users.filter((u) => u.role === "viewer");
+  const viewersWithCoverage = viewers.filter((u) => {
+    const userGroupIds = groups.filter(g => (g.memberIds || []).includes(u.id)).map(g => g.id);
+    return userGroupIds.some(gid => managerGroups.some(mg => mg.groupId === gid));
+  }).length;
   const setupItems = [
     { key: "groups", label: "Property groups created", started: groupsCount > 0, done: groupsCount > 0, actionTab: "groups", hint: `${groupsCount} group${groupsCount !== 1 ? "s" : ""}` },
     { key: "mlinks", label: "Managers assigned to groups", started: managerGroupLinksCount > 0, done: managerGroupLinksCount > 0, actionTab: "mlinks", hint: `${managerGroupLinksCount} assignment${managerGroupLinksCount !== 1 ? "s" : ""}` },
@@ -2408,9 +2485,10 @@ const maskPhone = (p) => {
 
 /** Searchable multi-select groups; `initialSelected` is array of group ids */
 const AdminSearchableGroupPickModal = ({ title, initialSelected, onClose, onSave }) => {
+  const { groups: allGroups } = useAppData();
   const [q, setQ] = useState("");
   const [sel, setSel] = useState(() => new Set(initialSelected));
-  const groups = loadGroups().filter((g) => !q.trim() || g.name.toLowerCase().includes(q.trim().toLowerCase()));
+  const groups = allGroups.filter((g) => !q.trim() || g.name.toLowerCase().includes(q.trim().toLowerCase()));
 
   const toggle = (gid) => {
     setSel((prev) => {
@@ -2446,119 +2524,109 @@ const AdminSearchableGroupPickModal = ({ title, initialSelected, onClose, onSave
 };
 
 const AdminUsersTab = () => {
-  const { refreshViewerSessionFromGroups } = useSession();
-  const [rows, setRows] = useState(() => loadPlatformUsers());
+  const { users, groups, token, refresh } = useAppData();
   const [rowQuery, setRowQuery] = useState("");
-  const [draft, setDraft] = useState({
-    name: "",
-    email: "",
-    phone: "",
-    role: "viewer",
-  });
+  const [draft, setDraft] = useState({ name: "", email: "", phone: "", role: "viewer" });
   const [sortBy, setSortBy] = useState("name-asc");
   const [filterRole, setFilterRole] = useState("all");
   const [filterGroupName, setFilterGroupName] = useState("");
-  const [filterManagerPartition, setFilterManagerPartition] = useState("");
   const [density, setDensity] = useState("comfortable");
-  const [edit, setEdit] = useState(null); // copy of row while editing in modal
+  const [edit, setEdit] = useState(null);
   const [groupPickUserId, setGroupPickUserId] = useState(null);
   const [viewGroupsUserId, setViewGroupsUserId] = useState(null);
   const [selectedUserIds, setSelectedUserIds] = useState(() => new Set());
   const [bulkGroupModalOpen, setBulkGroupModalOpen] = useState(false);
   const [pendingRemoveUserId, setPendingRemoveUserId] = useState(null);
+  const [saving, setSaving] = useState(false);
 
-  const persist = (next) => {
-    setRows(next);
-    savePlatformUsers(next);
+  const groupNameById = React.useMemo(() => {
+    const map = {};
+    groups.forEach(g => { map[g.id] = g.name; });
+    return map;
+  }, [groups]);
+
+  const groupsForUserId = (userId) =>
+    groups.filter(g => (g.memberIds || []).includes(userId)).map(g => g.id);
+
+  const groupNamesForUser = (userId) =>
+    groupsForUserId(userId).map(gid => groupNameById[gid] || `Group ${gid}`);
+
+  const groupSortKeyForUser = (userId) => {
+    const names = groupNamesForUser(userId).map(n => String(n).toLowerCase()).sort();
+    if (!names.length) return "~~~";
+    return names.join(" | ");
   };
 
-  const addUser = () => {
-    if (!draft.name.trim() || !draft.email.trim()) {
-      toastError("Could not add user: name and email are required.");
-      return;
+  const addUser = async () => {
+    if (!draft.name.trim()) { toastError("Could not add user: name is required."); return; }
+    if (draft.role !== "participant" && !draft.email.trim()) { toastError("Could not add user: email is required."); return; }
+    if (draft.role === "participant" && !draft.phone.trim()) { toastError("Could not add user: phone is required for participants."); return; }
+    setSaving(true);
+    try {
+      const body = { name: draft.name.trim(), role: draft.role };
+      if (draft.email.trim()) body.email = draft.email.trim();
+      if (draft.phone.trim()) body.phone = draft.phone.trim();
+      await apiFetch("/users", token, { method: "POST", body });
+      setDraft({ name: "", email: "", phone: "", role: "viewer" });
+      await refresh();
+      toastSuccess(`User added: ${draft.name.trim()}.`);
+    } catch (err) {
+      toastError(`Could not add user: ${err.message}`);
+    } finally {
+      setSaving(false);
     }
-    const id = Math.max(0, ...rows.map((r) => r.id)) + 1;
-    const initials = draft.name
-      .split(/\s+/)
-      .map((s) => s[0])
-      .join("")
-      .slice(0, 2)
-      .toUpperCase();
-    const base = {
-      id,
-      name: draft.name.trim(),
-      email: draft.email.trim(),
-      phone: (draft.phone || "").trim(),
-      initials,
-      title: draft.role === "admin" ? "Admin" : draft.role === "manager" ? "Manager" : "Viewer",
-      role: draft.role,
-    };
-    if (draft.role === "manager") {
-      base.managerPartitionId = id;
-    }
-    if (draft.role === "viewer") {
-      base.viewerManagerIds = getViewerManagerPartitionIdsFromGroups(id);
-    }
-    persist([...rows, base]);
-    setDraft({ name: "", email: "", phone: "", role: "viewer" });
-    toastSuccess(`User added: ${base.name}.`);
   };
 
-  const remove = (id) => {
-    const removed = rows.find((r) => r.id === id);
-    persist(rows.filter((r) => r.id !== id));
-    setSelectedUserIds((prev) => {
-      const n = new Set(prev);
-      n.delete(id);
-      return n;
-    });
-    toastSuccess(`User removed${removed ? `: ${removed.name}` : ""}.`);
+  const remove = async (id) => {
+    const removed = users.find(r => r.id === id);
+    setSaving(true);
+    try {
+      await apiFetch(`/users/${id}`, token, { method: "DELETE" });
+      setSelectedUserIds(prev => { const n = new Set(prev); n.delete(id); return n; });
+      await refresh();
+      toastSuccess(`User removed${removed ? `: ${removed.name}` : ""}.`);
+    } catch (err) {
+      toastError(`Could not remove user: ${err.message}`);
+    } finally {
+      setSaving(false);
+      setPendingRemoveUserId(null);
+    }
   };
 
-  const saveEdit = () => {
+  const saveEdit = async () => {
     if (!edit) return;
-    if (!edit.name?.trim() || !edit.email?.trim()) {
-      toastError("Could not save user: name and email are required.");
-      return;
+    if (!edit.name?.trim()) { toastError("Could not save user: name is required."); return; }
+    setSaving(true);
+    try {
+      const body = { name: edit.name.trim(), role: edit.role };
+      if (edit.email?.trim()) body.email = edit.email.trim();
+      if ((edit.phone || "").trim()) body.phone = edit.phone.trim();
+      await apiFetch(`/users/${edit.id}`, token, { method: "PATCH", body });
+      setEdit(null);
+      await refresh();
+      toastSuccess("User changes saved.");
+    } catch (err) {
+      toastError(`Could not save user: ${err.message}`);
+    } finally {
+      setSaving(false);
     }
-    persist(
-      rows.map((r) => {
-        if (r.id !== edit.id) return r;
-        let n = {
-          ...r,
-          name: edit.name.trim(),
-          email: edit.email.trim(),
-          phone: (edit.phone || "").trim(),
-          role: edit.role,
-          title: edit.role === "admin" ? "Admin" : edit.role === "manager" ? "Manager" : "Viewer",
-        };
-        if (edit.role === "manager") {
-          n.managerPartitionId = edit.managerPartitionId != null ? edit.managerPartitionId : edit.id;
-        }
-        else delete n.managerPartitionId;
-        if (edit.role === "viewer") {
-          n.viewerManagerIds = getViewerManagerPartitionIdsFromGroups(r.id);
-        } else delete n.viewerManagerIds;
-        if (edit.role === "admin") {
-          delete n.managerPartitionId;
-          delete n.viewerManagerIds;
-        }
-        return n;
-      })
-    );
-    setEdit(null);
-    refreshViewerSessionFromGroups();
-    toastSuccess("User changes saved.");
+  };
+
+  const setUserGroupMembershipsAPI = async (userId, newGroupIds) => {
+    const currentGroupIds = groupsForUserId(userId);
+    const newSet = new Set(newGroupIds);
+    const currentSet = new Set(currentGroupIds);
+    const toAdd = newGroupIds.filter(gid => !currentSet.has(gid));
+    const toRemove = currentGroupIds.filter(gid => !newSet.has(gid));
+    await Promise.all([
+      ...toAdd.map(gid => apiFetch(`/groups/${gid}/members`, token, { method: "POST", body: { userId } })),
+      ...toRemove.map(gid => apiFetch(`/groups/${gid}/members/${userId}`, token, { method: "DELETE" })),
+    ]);
   };
 
   const isUserEditDirty = (e) => {
     if (!e || !e.__baseline) return false;
-    const cur = {
-      name: String(e.name || "").trim(),
-      email: String(e.email || "").trim(),
-      phone: String(e.phone || "").trim(),
-      role: e.role,
-    };
+    const cur = { name: String(e.name || "").trim(), email: String(e.email || "").trim(), phone: String(e.phone || "").trim(), role: e.role };
     const base = e.__baseline;
     return cur.name !== base.name || cur.email !== base.email || cur.phone !== base.phone || cur.role !== base.role;
   };
@@ -2568,39 +2636,13 @@ const AdminUsersTab = () => {
     setEdit(null);
   };
 
-  const groupNameById = React.useMemo(() => {
-    const map = {};
-    loadGroups().forEach((g) => {
-      map[g.id] = g.name;
-    });
-    return map;
-  }, [rows]);
-
-  const groupNamesForUser = (userId) =>
-    groupsForUserId(userId).map((gid) => groupNameById[gid] || `Group ${gid}`);
-
-  const groupSortKeyForUser = (userId) => {
-    const names = groupNamesForUser(userId).map((n) => String(n).toLowerCase()).sort();
-    if (!names.length) return "~~~"; // push ungrouped users toward the end
-    return names.join(" | ");
-  };
-
-  const filteredRows = rows.filter((r) => {
+  const filteredRows = users.filter(r => {
     const q = rowQuery.trim().toLowerCase();
     const groupsText = groupNamesForUser(r.id).join(" ").toLowerCase();
-    const baseMatch =
-      !q ||
-      (r.name || "").toLowerCase().includes(q) ||
-      (r.email || "").toLowerCase().includes(q) ||
-      String(r.role || "").toLowerCase().includes(q) ||
-      groupsText.includes(q);
+    const baseMatch = !q || (r.name || "").toLowerCase().includes(q) || (r.email || "").toLowerCase().includes(q) || String(r.role || "").toLowerCase().includes(q) || groupsText.includes(q);
     if (!baseMatch) return false;
     if (filterRole !== "all" && r.role !== filterRole) return false;
     if (filterGroupName.trim() && !groupsText.includes(filterGroupName.trim().toLowerCase())) return false;
-    if (filterManagerPartition.trim()) {
-      const part = String(r.managerPartitionId ?? "");
-      if (!part.includes(filterManagerPartition.trim())) return false;
-    }
     return true;
   });
 
@@ -2617,23 +2659,18 @@ const AdminUsersTab = () => {
     }
     return 0;
   });
-  const visibleUserIds = new Set(sortedRows.map((r) => r.id));
-  const selectedVisibleUserIds = [...selectedUserIds].filter((uid) => visibleUserIds.has(uid));
-  const hiddenSelectedUserIds = [...selectedUserIds].filter((uid) => !visibleUserIds.has(uid));
+  const visibleUserIds = new Set(sortedRows.map(r => r.id));
+  const selectedVisibleUserIds = [...selectedUserIds].filter(uid => visibleUserIds.has(uid));
+  const hiddenSelectedUserIds = [...selectedUserIds].filter(uid => !visibleUserIds.has(uid));
 
   const toggleSelectedUser = (uid) => {
-    setSelectedUserIds((prev) => {
-      const n = new Set(prev);
-      if (n.has(uid)) n.delete(uid);
-      else n.add(uid);
-      return n;
-    });
+    setSelectedUserIds(prev => { const n = new Set(prev); if (n.has(uid)) n.delete(uid); else n.add(uid); return n; });
   };
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
       <div style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 10, padding: 20 }}>
-        <div style={{ fontWeight: 700, marginBottom: 12 }}>Add user (demo)</div>
+        <div style={{ fontWeight: 700, marginBottom: 12 }}>Add user</div>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 10 }}>
           <div>
             <div style={{ fontSize: 11, fontWeight: 600, color: "var(--text-3)", marginBottom: 4 }}>Name</div>
@@ -2644,14 +2681,8 @@ const AdminUsersTab = () => {
             <input aria-label="User email" placeholder="Email" value={draft.email} onChange={(e) => setDraft((d) => ({ ...d, email: e.target.value }))} style={inputSx} />
           </div>
           <div>
-            <div style={{ fontSize: 11, fontWeight: 600, color: "var(--text-3)", marginBottom: 4 }}>SMS to (phone)</div>
-            <input
-              aria-label="User phone number"
-              placeholder="+1…"
-              value={draft.phone}
-              onChange={(e) => setDraft((d) => ({ ...d, phone: e.target.value }))}
-              style={inputSx}
-            />
+            <div style={{ fontSize: 11, fontWeight: 600, color: "var(--text-3)", marginBottom: 4 }}>Phone (E.164)</div>
+            <input aria-label="User phone number" placeholder="+1…" value={draft.phone} onChange={(e) => setDraft((d) => ({ ...d, phone: e.target.value }))} style={inputSx} />
           </div>
           <div>
             <div style={{ fontSize: 11, fontWeight: 600, color: "var(--text-3)", marginBottom: 4 }}>Role</div>
@@ -2661,19 +2692,13 @@ const AdminUsersTab = () => {
               <option value="viewer">viewer</option>
             </select>
           </div>
-          {draft.role === "manager" ? (
-            <div style={{ fontSize: 13, color: "var(--text-2)", padding: "8px 0", alignSelf: "center", gridColumn: "1 / -1" }}>
-              User ID and manager partition are assigned automatically when you save.
-            </div>
-          ) : draft.role === "viewer" ? (
-            <div style={{ fontSize: 13, color: "var(--text-2)", padding: "8px 0", alignSelf: "center", gridColumn: "1 / -1" }}>
-              Viewer manager access comes from <b>Groups</b> membership (not typed here). Add the user to groups that are linked to managers.
-            </div>
-          ) : (
-            <div style={{ gridColumn: "1 / -1" }} />
-          )}
+          <div style={{ fontSize: 13, color: "var(--text-2)", padding: "8px 0", alignSelf: "center", gridColumn: "1 / -1" }}>
+            {draft.role === "viewer"
+              ? "Viewer access is determined by group membership — add the user to groups after creating them."
+              : "An invite email will be sent so the user can set their own password."}
+          </div>
         </div>
-        <button type="button" onClick={addUser} style={{ marginTop: 12, ...primaryBtn }}>
+        <button type="button" onClick={addUser} disabled={saving} style={{ marginTop: 12, ...primaryBtn, opacity: saving ? 0.6 : 1 }}>
           Add user
         </button>
       </div>
@@ -2686,20 +2711,7 @@ const AdminUsersTab = () => {
           <option value="manager">Role: Manager</option>
           <option value="viewer">Role: Viewer</option>
         </select>
-        <input
-          aria-label="Filter users by group name"
-          placeholder="Filter group name…"
-          value={filterGroupName}
-          onChange={(e) => setFilterGroupName(e.target.value)}
-          style={{ ...inputSx, width: 180 }}
-        />
-        <input
-          aria-label="Filter users by manager partition"
-          placeholder="Manager partition…"
-          value={filterManagerPartition}
-          onChange={(e) => setFilterManagerPartition(e.target.value)}
-          style={{ ...inputSx, width: 170 }}
-        />
+        <input aria-label="Filter users by group name" placeholder="Filter group name…" value={filterGroupName} onChange={(e) => setFilterGroupName(e.target.value)} style={{ ...inputSx, width: 180 }} />
         <select aria-label="Sort users table" value={sortBy} onChange={(e) => setSortBy(e.target.value)} style={{ ...inputSx, width: 200 }}>
           <option value="name-asc">Sort: Name A-Z</option>
           <option value="name-desc">Sort: Name Z-A</option>
@@ -2844,14 +2856,14 @@ const AdminUsersTab = () => {
             </div>
             <div>
               <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 4 }}>Name</div>
-              <input value={edit.name} onChange={(e) => setEdit((x) => ({ ...x, name: e.target.value }))} style={inputSx} />
+              <input value={edit.name || ""} onChange={(e) => setEdit((x) => ({ ...x, name: e.target.value }))} style={inputSx} />
             </div>
             <div>
               <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 4 }}>Email</div>
-              <input value={edit.email} onChange={(e) => setEdit((x) => ({ ...x, email: e.target.value }))} style={inputSx} />
+              <input value={edit.email || ""} onChange={(e) => setEdit((x) => ({ ...x, email: e.target.value }))} style={inputSx} />
             </div>
             <div>
-              <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 4 }}>SMS to (phone)</div>
+              <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 4 }}>Phone (E.164)</div>
               <input value={edit.phone || ""} onChange={(e) => setEdit((x) => ({ ...x, phone: e.target.value }))} style={inputSx} />
             </div>
             <div>
@@ -2862,33 +2874,11 @@ const AdminUsersTab = () => {
                 <option value="viewer">viewer</option>
               </select>
             </div>
-            {edit.role === "manager" && (
-              <div style={{ fontSize: 13, color: "var(--text-2)" }}>
-                <div style={{ fontSize: 12, fontWeight: 600, color: "var(--text-3)", marginBottom: 4 }}>Manager partition</div>
-                <div>
-                  <span style={{ fontFamily: "ui-monospace,monospace", fontWeight: 600 }}>{edit.managerPartitionId ?? edit.id}</span> — tied to this account (system). Reassign groups under Manager ↔ groups if coverage should change.
-                </div>
-              </div>
-            )}
-            {edit.role === "viewer" && (
-              <div style={{ fontSize: 13, color: "var(--text-2)" }}>
-                <div style={{ fontSize: 12, fontWeight: 600, color: "var(--text-3)", marginBottom: 4 }}>Viewer manager access (from groups)</div>
-                <div>
-                  Manager partitions:{" "}
-                  <span style={{ fontFamily: "ui-monospace,monospace", fontWeight: 600 }}>
-                    {getViewerManagerPartitionIdsFromGroups(edit.id).join(", ") || "—"}
-                  </span>
-                  <span style={{ color: "var(--text-3)", display: "block", marginTop: 6, fontSize: 12 }}>
-                    Add this user to groups under <b>Groups</b>; each group linked in <b>Manager ↔ groups</b> adds a manager here. Save to refresh stored ids. Log in again if you are currently signed in as this viewer.
-                  </span>
-                </div>
-              </div>
-            )}
             <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 8 }}>
               <button type="button" onClick={requestCloseUserEdit} style={{ border: "1px solid var(--border)", borderRadius: 8, padding: "8px 16px" }}>
                 Cancel
               </button>
-              <button type="button" onClick={saveEdit} style={primaryBtn}>
+              <button type="button" onClick={saveEdit} disabled={saving} style={{ ...primaryBtn, opacity: saving ? 0.6 : 1 }}>
                 Save changes
               </button>
             </div>
@@ -2901,12 +2891,18 @@ const AdminUsersTab = () => {
           title="Assign groups to user"
           initialSelected={groupsForUserId(groupPickUserId)}
           onClose={() => setGroupPickUserId(null)}
-          onSave={(ids) => {
-            setUserGroupMemberships(groupPickUserId, ids);
-            setGroupPickUserId(null);
-            setRows(loadPlatformUsers());
-            refreshViewerSessionFromGroups();
-            toastSuccess("User groups updated.");
+          onSave={async (ids) => {
+            setSaving(true);
+            try {
+              await setUserGroupMembershipsAPI(groupPickUserId, ids);
+              await refresh();
+              toastSuccess("User groups updated.");
+            } catch (err) {
+              toastError(`Could not update groups: ${err.message}`);
+            } finally {
+              setSaving(false);
+              setGroupPickUserId(null);
+            }
           }}
         />
       )}
@@ -2915,35 +2911,38 @@ const AdminUsersTab = () => {
           title={`Replace groups for selected users (${selectedVisibleUserIds.length})`}
           initialSelected={[]}
           onClose={() => setBulkGroupModalOpen(false)}
-          onSave={(ids) => {
+          onSave={async (ids) => {
             const selected = [...selectedVisibleUserIds];
-            const names = ids.map((gid) => groupNameById[gid] || `Group ${gid}`);
+            const names = ids.map(gid => groupNameById[gid] || `Group ${gid}`);
             const hiddenCount = hiddenSelectedUserIds.length;
             const proceed = confirm(
               `Apply group replacement to ${selected.length} visible user(s)?${hiddenCount ? `\n${hiddenCount} hidden selected user(s) will be skipped due to filters.` : ""}\n\nNew groups: ${names.length ? names.join(", ") : "None"}`
             );
             if (!proceed) return;
-            if (!selected.length) {
-              toastError("No visible selected users to update.");
-              return;
+            if (!selected.length) { toastError("No visible selected users to update."); return; }
+            setSaving(true);
+            try {
+              await Promise.all(selected.map(uid => setUserGroupMembershipsAPI(uid, ids)));
+              setBulkGroupModalOpen(false);
+              setSelectedUserIds(new Set());
+              await refresh();
+              toastSuccess(`Bulk group update complete: updated ${selected.length} users.`);
+            } catch (err) {
+              toastError(`Bulk update failed: ${err.message}`);
+            } finally {
+              setSaving(false);
             }
-            selected.forEach((uid) => setUserGroupMemberships(uid, ids));
-            setBulkGroupModalOpen(false);
-            setSelectedUserIds(new Set());
-            setRows(loadPlatformUsers());
-            refreshViewerSessionFromGroups();
-            toastSuccess(`Bulk group update complete: updated ${selected.length} users.`);
           }}
         />
       )}
       {pendingRemoveUserId != null && (
         <Modal title="Remove user?" onClose={() => setPendingRemoveUserId(null)} width={420}>
           {(() => {
-            const user = rows.find((r) => r.id === pendingRemoveUserId);
+            const user = users.find((r) => r.id === pendingRemoveUserId);
             return (
               <div>
                 <div style={{ fontSize: 14, color: "var(--text-2)", marginBottom: 18, lineHeight: 1.5 }}>
-                  Remove <b>{user?.name || "this user"}</b>{user?.email ? ` (${user.email})` : ""} from the directory? This user will no longer be able to log in.
+                  Remove <b>{user?.name || "this user"}</b>{user?.email ? ` (${user.email})` : ""} from the directory? This action cannot be undone.
                 </div>
                 <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
                   <button type="button" onClick={() => setPendingRemoveUserId(null)} style={{ border: "1px solid var(--border)", borderRadius: 8, padding: "8px 16px" }}>
@@ -2951,11 +2950,9 @@ const AdminUsersTab = () => {
                   </button>
                   <button
                     type="button"
-                    onClick={() => {
-                      remove(pendingRemoveUserId);
-                      setPendingRemoveUserId(null);
-                    }}
-                    style={{ background: "var(--red)", color: "#fff", borderRadius: 8, padding: "8px 16px", fontWeight: 600 }}
+                    onClick={() => remove(pendingRemoveUserId)}
+                    disabled={saving}
+                    style={{ background: "var(--red)", color: "#fff", borderRadius: 8, padding: "8px 16px", fontWeight: 600, opacity: saving ? 0.6 : 1 }}
                   >
                     Remove
                   </button>
@@ -2968,7 +2965,7 @@ const AdminUsersTab = () => {
       {viewGroupsUserId != null && (
         <Modal title="User groups" onClose={() => setViewGroupsUserId(null)} width={420}>
           {(() => {
-            const user = rows.find((r) => r.id === viewGroupsUserId);
+            const user = users.find((r) => r.id === viewGroupsUserId);
             const names = groupNamesForUser(viewGroupsUserId);
             return (
               <div>
@@ -3010,77 +3007,71 @@ const AdminUsersTab = () => {
 };
 
 const AdminGroupsTab = () => {
-  const { refreshViewerSessionFromGroups } = useSession();
-  const [groups, setGroups] = useState(() => loadGroups());
-  const [members, setMembers] = useState(() => loadGroupMembers());
-  const [modal, setModal] = useState(null); // null | { id?: number, name: string, description: string }
+  const { users, groups, token, refresh: refreshData } = useAppData();
+  const [modal, setModal] = useState(null);
+  const [editingMemberIds, setEditingMemberIds] = useState(() => new Set());
+  const [saving, setSaving] = useState(false);
 
-  const refresh = () => {
-    setGroups(loadGroups());
-    setMembers(loadGroupMembers());
+  const openCreate = () => {
+    setModal({ name: "", description: "", __baseline: { name: "", description: "" } });
+    setEditingMemberIds(new Set());
   };
 
-  const openCreate = () => setModal({ name: "", description: "", __baseline: { name: "", description: "" } });
   const openEdit = (g) => {
-    setMembers(loadGroupMembers());
-    setModal({
-      id: g.id,
-      name: g.name,
-      description: g.description || "",
-      __baseline: { name: String(g.name || ""), description: String(g.description || "") },
-    });
+    setModal({ id: g.id, name: g.name, description: g.description || "", __baseline: { name: String(g.name || ""), description: String(g.description || "") } });
+    setEditingMemberIds(new Set(g.memberIds || []));
   };
 
-  const saveModal = () => {
-    if (!modal || !modal.name.trim()) {
-      toastError("Could not save group: name is required.");
-      return;
+  const saveModal = async () => {
+    if (!modal || !modal.name.trim()) { toastError("Could not save group: name is required."); return; }
+    setSaving(true);
+    try {
+      if (modal.id == null) {
+        await apiFetch("/groups", token, { method: "POST", body: { name: modal.name.trim(), description: modal.description?.trim() || undefined } });
+        toastSuccess("Group created.");
+      } else {
+        await apiFetch(`/groups/${modal.id}`, token, { method: "PATCH", body: { name: modal.name.trim(), description: modal.description?.trim() || undefined } });
+        const currentGroup = groups.find(g => g.id === modal.id);
+        const currentIds = new Set(currentGroup?.memberIds || []);
+        const toAdd = [...editingMemberIds].filter(uid => !currentIds.has(uid));
+        const toRemove = [...currentIds].filter(uid => !editingMemberIds.has(uid));
+        await Promise.all([
+          ...toAdd.map(uid => apiFetch(`/groups/${modal.id}/members`, token, { method: "POST", body: { userId: uid } })),
+          ...toRemove.map(uid => apiFetch(`/groups/${modal.id}/members/${uid}`, token, { method: "DELETE" })),
+        ]);
+        toastSuccess("Group changes saved.");
+      }
+      setModal(null);
+      await refreshData();
+    } catch (err) {
+      toastError(`Could not save group: ${err.message}`);
+    } finally {
+      setSaving(false);
     }
-    let nextG = loadGroups();
-    if (modal.id == null) {
-      const gid = Math.max(0, ...nextG.map((x) => x.id)) + 1;
-      nextG = [...nextG, { id: gid, name: modal.name.trim(), description: (modal.description || "").trim() || undefined }];
-      saveGroups(nextG);
-      refresh();
-      setModal({ id: gid, name: modal.name.trim(), description: (modal.description || "").trim() });
-      toastSuccess("Group created.");
-      return;
+  };
+
+  const deleteGroup = async (id) => {
+    if (!confirm("Delete this group? This will remove all member and manager links.")) return;
+    const target = groups.find(g => g.id === id);
+    setSaving(true);
+    try {
+      await apiFetch(`/groups/${id}`, token, { method: "DELETE" });
+      await refreshData();
+      toastSuccess(`Group deleted${target ? `: ${target.name}` : ""}.`);
+    } catch (err) {
+      toastError(`Could not delete group: ${err.message}`);
+    } finally {
+      setSaving(false);
     }
-    nextG = nextG.map((x) =>
-      x.id === modal.id ? { ...x, name: modal.name.trim(), description: (modal.description || "").trim() || undefined } : x
-    );
-    saveGroups(nextG);
-    setModal(null);
-    refresh();
-    toastSuccess("Group changes saved.");
   };
 
-  const deleteGroup = (id) => {
-    if (!confirm("Delete this group and its member links?")) return;
-    const target = loadGroups().find((g) => g.id === id);
-    saveGroups(loadGroups().filter((g) => g.id !== id));
-    saveGroupMembers(loadGroupMembers().filter((m) => m.groupId !== id));
-    saveManagerGroups(loadManagerGroups().filter((l) => l.groupId !== id));
-    refresh();
-    refreshViewerSessionFromGroups();
-    toastSuccess(`Group deleted${target ? `: ${target.name}` : ""}.`);
-  };
-
-  const platformUsers = loadPlatformUsers();
-
-  const toggleMember = (groupId, kind, refId) => {
-    const m = loadGroupMembers();
-    const key = (row) =>
-      row.groupId === groupId && (kind === "user" ? row.userId === refId && row.employeeId == null : row.employeeId === refId);
-    const exists = m.some(key);
-    const next = exists ? m.filter((row) => !key(row)) : [...m, kind === "user" ? { groupId, userId: refId } : { groupId, employeeId: refId }];
-    saveGroupMembers(next);
-    setMembers(next);
-    refreshViewerSessionFromGroups();
-    toastSuccess(exists ? "Group membership removed." : "Group membership added.");
+  const toggleMember = (userId) => {
+    setEditingMemberIds(prev => { const n = new Set(prev); if (n.has(userId)) n.delete(userId); else n.add(userId); return n; });
   };
 
   const editingId = modal && modal.id != null ? modal.id : null;
+  const platformUsers = users.filter(u => u.role !== "participant");
+
   const isGroupModalDirty = (m) => {
     if (!m || !m.__baseline) return false;
     return String(m.name || "").trim() !== String(m.__baseline.name || "").trim() || String(m.description || "").trim() !== String(m.__baseline.description || "").trim();
@@ -3100,24 +3091,19 @@ const AdminGroupsTab = () => {
       </div>
       <div style={{ border: "1px solid var(--border)", borderRadius: 10, overflow: "hidden" }}>
         {groups.map((g) => (
-          <div
-            key={g.id}
-            style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 14px", borderBottom: "1px solid var(--border)" }}
-          >
+          <div key={g.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 14px", borderBottom: "1px solid var(--border)" }}>
             <div>
               <div style={{ fontWeight: 600 }}>{g.name}</div>
               {g.description && <div style={{ fontSize: 12, color: "var(--text-3)" }}>{g.description}</div>}
+              <div style={{ fontSize: 12, color: "var(--text-3)" }}>{(g.memberIds || []).length} member{(g.memberIds || []).length !== 1 ? "s" : ""}</div>
             </div>
             <div style={{ display: "flex", gap: 8 }}>
-              <button type="button" onClick={() => openEdit(g)} style={{ fontSize: 13, fontWeight: 600, color: "var(--primary)" }}>
-                Edit
-              </button>
-              <button type="button" onClick={() => deleteGroup(g.id)} style={{ fontSize: 13, fontWeight: 600, color: "var(--red)" }}>
-                Delete
-              </button>
+              <button type="button" onClick={() => openEdit(g)} style={{ fontSize: 13, fontWeight: 600, color: "var(--primary)" }}>Edit</button>
+              <button type="button" onClick={() => deleteGroup(g.id)} disabled={saving} style={{ fontSize: 13, fontWeight: 600, color: "var(--red)" }}>Delete</button>
             </div>
           </div>
         ))}
+        {groups.length === 0 && <div style={{ padding: 16, color: "var(--text-3)", fontSize: 13 }}>No groups yet. Create one to get started.</div>}
       </div>
 
       {modal && (
@@ -3131,31 +3117,14 @@ const AdminGroupsTab = () => {
               <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 4 }}>Description (optional)</div>
               <input value={modal.description || ""} onChange={(e) => setModal((x) => ({ ...x, description: e.target.value }))} style={inputSx} />
             </div>
-            {editingId != null && (
+            {editingId != null && platformUsers.length > 0 && (
               <>
                 <div style={{ fontSize: 12, fontWeight: 600, color: "var(--text-3)", marginTop: 4 }}>Platform users</div>
-                <div style={{ display: "flex", flexDirection: "column", gap: 6, maxHeight: 160, overflowY: "auto" }}>
+                <div style={{ display: "flex", flexDirection: "column", gap: 6, maxHeight: 200, overflowY: "auto" }}>
                   {platformUsers.map((u) => (
                     <label key={u.id} style={{ fontSize: 14, display: "flex", alignItems: "center", gap: 8 }}>
-                      <input
-                        type="checkbox"
-                        checked={members.some((m) => m.groupId === editingId && m.userId === u.id && m.employeeId == null)}
-                        onChange={() => toggleMember(editingId, "user", u.id)}
-                      />
+                      <input type="checkbox" checked={editingMemberIds.has(u.id)} onChange={() => toggleMember(u.id)} />
                       {u.name} ({u.role})
-                    </label>
-                  ))}
-                </div>
-                <div style={{ fontSize: 12, fontWeight: 600, color: "var(--text-3)" }}>Property contacts (employees)</div>
-                <div style={{ display: "flex", flexDirection: "column", gap: 6, maxHeight: 200, overflowY: "auto" }}>
-                  {EMPLOYEES.map((e) => (
-                    <label key={e.id} style={{ fontSize: 14, display: "flex", alignItems: "center", gap: 8 }}>
-                      <input
-                        type="checkbox"
-                        checked={members.some((m) => m.groupId === editingId && m.employeeId === e.id)}
-                        onChange={() => toggleMember(editingId, "employee", e.id)}
-                      />
-                      {e.name} — {e.property}
                     </label>
                   ))}
                 </div>
@@ -3165,7 +3134,7 @@ const AdminGroupsTab = () => {
               <button type="button" onClick={requestCloseGroupModal} style={{ border: "1px solid var(--border)", borderRadius: 8, padding: "8px 16px" }}>
                 Cancel
               </button>
-              <button type="button" onClick={saveModal} style={primaryBtn}>
+              <button type="button" onClick={saveModal} disabled={saving} style={{ ...primaryBtn, opacity: saving ? 0.6 : 1 }}>
                 {modal.id == null ? "Create" : "Save"}
               </button>
             </div>
@@ -3177,50 +3146,59 @@ const AdminGroupsTab = () => {
 };
 
 const AdminManagerGroupsTab = () => {
-  const { refreshViewerSessionFromGroups } = useSession();
-  const managers = loadPlatformUsers().filter((u) => u.role === "manager");
+  const { users, groups, managerGroups, token, refresh: refreshData } = useAppData();
+  const managers = users.filter(u => u.role === "manager");
   const [mgrQuery, setMgrQuery] = useState("");
   const [mgrSort, setMgrSort] = useState("name-asc");
-  const [selectedManagerId, setSelectedManagerId] = useState(() => managers[0]?.id ?? null);
-  const [links, setLinks] = useState(() => loadManagerGroups());
+  const [selectedManagerId, setSelectedManagerId] = useState(null);
   const [groupModalOpen, setGroupModalOpen] = useState(false);
+  const [saving, setSaving] = useState(false);
+
+  React.useEffect(() => {
+    if (!selectedManagerId && managers.length > 0) setSelectedManagerId(managers[0].id);
+  }, [managers]);
 
   const filteredMgr = managers.filter((m) => {
     if (!mgrQuery.trim()) return true;
     const q = mgrQuery.trim().toLowerCase();
-    return (
-      (m.name || "").toLowerCase().includes(q) ||
-      String(m.email || "")
-        .toLowerCase()
-        .includes(q) ||
-      String(m.managerPartitionId ?? "").includes(q)
-    );
+    return (m.name || "").toLowerCase().includes(q) || String(m.email || "").toLowerCase().includes(q);
   });
 
   const sortedMgr = [...filteredMgr].sort((a, b) => {
     if (mgrSort === "name-asc") return String(a.name || "").localeCompare(String(b.name || ""));
     if (mgrSort === "name-desc") return String(b.name || "").localeCompare(String(a.name || ""));
-    if (mgrSort === "partition") return Number(a.managerPartitionId || 0) - Number(b.managerPartitionId || 0);
     return 0;
   });
 
   const sel = managers.find((m) => m.id === selectedManagerId);
-  const groups = loadGroups();
-  const assignedIds = sel ? links.filter((l) => l.managerId === sel.id).map((l) => l.groupId) : [];
+  const assignedIds = sel ? managerGroups.filter((l) => l.managerId === sel.id).map((l) => l.groupId) : [];
 
-  const applyManagerGroups = (groupIds) => {
-    if (!sel) {
-      toastError("Select a manager first.");
-      return;
+  const groupNameById = React.useMemo(() => {
+    const map = {};
+    groups.forEach(g => { map[g.id] = g.name; });
+    return map;
+  }, [groups]);
+
+  const applyManagerGroups = async (groupIds) => {
+    if (!sel) { toastError("Select a manager first."); return; }
+    setSaving(true);
+    try {
+      const newSet = new Set(groupIds);
+      const currentSet = new Set(assignedIds);
+      const toAdd = groupIds.filter(gid => !currentSet.has(gid));
+      const toRemove = assignedIds.filter(gid => !newSet.has(gid));
+      await Promise.all([
+        ...toAdd.map(gid => apiFetch(`/groups/${gid}/managers`, token, { method: "POST", body: { managerId: sel.id } })),
+        ...toRemove.map(gid => apiFetch(`/groups/${gid}/managers/${sel.id}`, token, { method: "DELETE" })),
+      ]);
+      setGroupModalOpen(false);
+      await refreshData();
+      toastSuccess("Manager group assignment saved.");
+    } catch (err) {
+      toastError(`Could not save assignment: ${err.message}`);
+    } finally {
+      setSaving(false);
     }
-    const gidSet = new Set(groupIds);
-    const rest = links.filter((l) => l.managerId !== sel.id);
-    const next = [...rest, ...[...gidSet].map((gid) => ({ managerId: sel.id, groupId: gid }))];
-    setLinks(next);
-    saveManagerGroups(next);
-    setGroupModalOpen(false);
-    refreshViewerSessionFromGroups();
-    toastSuccess("Manager group assignment saved.");
   };
 
   return (
@@ -3231,17 +3209,8 @@ const AdminManagerGroupsTab = () => {
         <select value={mgrSort} onChange={(e) => setMgrSort(e.target.value)} style={{ ...inputSx, marginBottom: 8 }}>
           <option value="name-asc">Sort: Name A-Z</option>
           <option value="name-desc">Sort: Name Z-A</option>
-          <option value="partition">Sort: Partition</option>
         </select>
-        <div
-          style={{
-            border: "1px solid var(--border)",
-            borderRadius: 10,
-            maxHeight: 440,
-            overflowY: "auto",
-            background: "var(--surface)",
-          }}
-        >
+        <div style={{ border: "1px solid var(--border)", borderRadius: 10, maxHeight: 440, overflowY: "auto", background: "var(--surface)" }}>
           {sortedMgr.map((m) => {
             const active = m.id === selectedManagerId;
             return (
@@ -3249,18 +3218,10 @@ const AdminManagerGroupsTab = () => {
                 key={m.id}
                 type="button"
                 onClick={() => setSelectedManagerId(m.id)}
-                style={{
-                  width: "100%",
-                  textAlign: "left",
-                  padding: "10px 12px",
-                  border: "none",
-                  borderBottom: "1px solid var(--border)",
-                  background: active ? "var(--primary-light)" : "var(--surface)",
-                  cursor: "pointer",
-                }}
+                style={{ width: "100%", textAlign: "left", padding: "10px 12px", border: "none", borderBottom: "1px solid var(--border)", background: active ? "var(--primary-light)" : "var(--surface)", cursor: "pointer" }}
               >
                 <div style={{ fontWeight: 600, fontSize: 14 }}>{m.name}</div>
-                <div style={{ fontSize: 12, color: "var(--text-3)" }}>Partition {m.managerPartitionId}</div>
+                <div style={{ fontSize: 12, color: "var(--text-3)" }}>{m.email || "—"}</div>
               </button>
             );
           })}
@@ -3274,38 +3235,23 @@ const AdminManagerGroupsTab = () => {
           <>
             <h2 style={{ fontSize: 18, fontWeight: 700, marginBottom: 12 }}>{sel.name}</h2>
             <div style={{ display: "grid", gap: 8, fontSize: 14, color: "var(--text-2)", marginBottom: 16 }}>
-              <div>
-                <span style={{ color: "var(--text-3)", fontWeight: 600 }}>Email</span> {sel.email || "—"}
-              </div>
-              <div>
-                <span style={{ color: "var(--text-3)", fontWeight: 600 }}>SMS to</span> {maskPhone(sel.phone)}
-              </div>
-              <div>
-                <span style={{ color: "var(--text-3)", fontWeight: 600 }}>Partition</span> {sel.managerPartitionId}
-              </div>
-              <div>
-                <span style={{ color: "var(--text-3)", fontWeight: 600 }}>User id</span> {sel.id}
-              </div>
+              <div><span style={{ color: "var(--text-3)", fontWeight: 600 }}>Email</span> {sel.email || "—"}</div>
+              <div><span style={{ color: "var(--text-3)", fontWeight: 600 }}>SMS to</span> {maskPhone(sel.phone)}</div>
+              <div><span style={{ color: "var(--text-3)", fontWeight: 600 }}>User id</span> {sel.id}</div>
             </div>
             <button type="button" onClick={() => setGroupModalOpen(true)} style={{ ...primaryBtn, marginBottom: 16 }}>
               Assign groups from list…
             </button>
             <div style={{ fontSize: 12, color: "var(--text-2)", marginBottom: 12 }}>
-              What this affects: this manager's group links control visible property contacts, schedules, and correspondences for that partition.
+              What this affects: this manager's group links control visible schedules and recipients.
             </div>
             <div style={{ fontSize: 12, fontWeight: 600, color: "var(--text-3)", marginBottom: 6 }}>Assigned groups ({assignedIds.length})</div>
             <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-              {assignedIds.map((gid) => {
-                const g = groups.find((x) => x.id === gid);
-                return (
-                  <span
-                    key={gid}
-                    style={{ fontSize: 12, padding: "4px 10px", borderRadius: 99, background: "var(--bg)", border: "1px solid var(--border)" }}
-                  >
-                    {g ? g.name : gid}
-                  </span>
-                );
-              })}
+              {assignedIds.map((gid) => (
+                <span key={gid} style={{ fontSize: 12, padding: "4px 10px", borderRadius: 99, background: "var(--bg)", border: "1px solid var(--border)" }}>
+                  {groupNameById[gid] || `Group ${gid}`}
+                </span>
+              ))}
               {assignedIds.length === 0 && <span style={{ fontSize: 13, color: "var(--text-3)" }}>None yet.</span>}
             </div>
           </>
@@ -4216,17 +4162,83 @@ const allowedPages = (role) => {
   return [];
 };
 
+const ResetPasswordForm = () => {
+  const { setNeedsPasswordReset } = useSession();
+  const [password, setPassword] = React.useState("");
+  const [confirm, setConfirm] = React.useState("");
+  const [error, setError] = React.useState(null);
+  const [loading, setLoading] = React.useState(false);
+  const [done, setDone] = React.useState(false);
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    if (password !== confirm) { setError("Passwords do not match."); return; }
+    if (password.length < 8) { setError("Password must be at least 8 characters."); return; }
+    setError(null);
+    setLoading(true);
+    try {
+      const { error } = await supabaseClient.auth.updateUser({ password });
+      if (error) throw error;
+      setDone(true);
+      setTimeout(() => setNeedsPasswordReset(false), 2000);
+    } catch (err) {
+      setError(err.message || "Failed to update password.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const cardSx = { minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: "var(--bg)", padding: 24 };
+  const innerSx = { background: "var(--surface)", padding: 32, borderRadius: 12, maxWidth: 440, width: "100%", border: "1px solid var(--border)", boxShadow: "var(--shadow)" };
+  const inputSx = { width: "100%", padding: "10px 12px", borderRadius: 8, border: "1px solid var(--border)", fontSize: 14, background: "var(--bg)", color: "var(--text)" };
+  const labelSx = { display: "block", fontSize: 12, fontWeight: 600, marginBottom: 5, color: "var(--text-2)" };
+
+  return (
+    <div style={cardSx}>
+      <div style={innerSx}>
+        <h1 style={{ fontSize: 20, fontWeight: 700, marginBottom: 4 }}>Set new password</h1>
+        <p style={{ color: "var(--text-2)", fontSize: 14, marginBottom: 24 }}>AI Reporter — Hotel Operations</p>
+        {done ? (
+          <p style={{ color: "var(--green)", fontSize: 14 }}>Password updated. Signing you in…</p>
+        ) : (
+          <form onSubmit={handleSubmit}>
+            <div style={{ marginBottom: 14 }}>
+              <label style={labelSx}>New password</label>
+              <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} required minLength={8} autoComplete="new-password" style={inputSx} />
+            </div>
+            <div style={{ marginBottom: 20 }}>
+              <label style={labelSx}>Confirm password</label>
+              <input type="password" value={confirm} onChange={(e) => setConfirm(e.target.value)} required minLength={8} autoComplete="new-password" style={inputSx} />
+            </div>
+            {error && <p style={{ color: "var(--red)", fontSize: 13, marginBottom: 14 }}>{error}</p>}
+            <button type="submit" disabled={loading} style={{ width: "100%", padding: 11, borderRadius: 8, background: "var(--primary)", color: "#fff", fontSize: 14, fontWeight: 600, opacity: loading ? 0.7 : 1 }}>
+              {loading ? "Saving…" : "Set password"}
+            </button>
+          </form>
+        )}
+      </div>
+    </div>
+  );
+};
+
 const LoginWall = () => {
   const { login } = useSession();
+  const [view, setView] = React.useState("login"); // "login" | "forgot" | "sent"
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [forgotEmail, setForgotEmail] = useState("");
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(false);
 
+  const cardSx  = { minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: "var(--bg)", padding: 24 };
+  const innerSx = { background: "var(--surface)", padding: 32, borderRadius: 12, maxWidth: 440, width: "100%", border: "1px solid var(--border)", boxShadow: "var(--shadow)" };
+  const inputSx = { width: "100%", padding: "10px 12px", borderRadius: 8, border: "1px solid var(--border)", fontSize: 14, background: "var(--bg)", color: "var(--text)" };
+  const labelSx = { display: "block", fontSize: 12, fontWeight: 600, marginBottom: 5, color: "var(--text-2)" };
+
   if (!supabaseClient) {
     return (
-      <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: "var(--bg)", padding: 24 }}>
-        <div style={{ background: "var(--surface)", padding: 32, borderRadius: 12, maxWidth: 440, width: "100%", border: "1px solid var(--border)", boxShadow: "var(--shadow)" }}>
+      <div style={cardSx}>
+        <div style={innerSx}>
           <h1 style={{ fontSize: 20, fontWeight: 700, marginBottom: 12 }}>AI Reporter</h1>
           <p style={{ color: "var(--red)", fontSize: 14, lineHeight: 1.5 }}>
             Supabase is not configured. Set <code>SUPABASE_URL</code> and <code>SUPABASE_ANON_KEY</code> in the script before deploying.
@@ -4235,21 +4247,6 @@ const LoginWall = () => {
       </div>
     );
   }
-
-  const handleGoogleSignIn = async () => {
-    setError(null);
-    setLoading(true);
-    try {
-      const { error } = await supabaseClient.auth.signInWithOAuth({
-        provider: 'google',
-        options: { redirectTo: window.location.href },
-      });
-      if (error) throw error;
-    } catch (err) {
-      setError(err.message || "Google sign in failed.");
-      setLoading(false);
-    }
-  };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -4264,64 +4261,84 @@ const LoginWall = () => {
     }
   };
 
+  const handleForgot = async (e) => {
+    e.preventDefault();
+    setError(null);
+    setLoading(true);
+    try {
+      const { error } = await supabaseClient.auth.resetPasswordForEmail(forgotEmail, {
+        redirectTo: window.location.href,
+      });
+      if (error) throw error;
+      setView("sent");
+    } catch (err) {
+      setError(err.message || "Could not send reset email. Check the address and try again.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  if (view === "sent") {
+    return (
+      <div style={cardSx}>
+        <div style={innerSx}>
+          <h1 style={{ fontSize: 20, fontWeight: 700, marginBottom: 4 }}>Check your email</h1>
+          <p style={{ color: "var(--text-2)", fontSize: 14, marginBottom: 20 }}>
+            We sent a password reset link to <strong>{forgotEmail}</strong>. Click the link in the email to set a new password.
+          </p>
+          <button onClick={() => { setView("login"); setError(null); }} style={{ fontSize: 13, color: "var(--primary)", background: "none", border: "none", cursor: "pointer", padding: 0 }}>
+            Back to sign in
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  if (view === "forgot") {
+    return (
+      <div style={cardSx}>
+        <div style={innerSx}>
+          <h1 style={{ fontSize: 20, fontWeight: 700, marginBottom: 4 }}>Reset password</h1>
+          <p style={{ color: "var(--text-2)", fontSize: 14, marginBottom: 24 }}>Enter your email and we'll send a reset link.</p>
+          <form onSubmit={handleForgot}>
+            <div style={{ marginBottom: 20 }}>
+              <label style={labelSx}>Email</label>
+              <input type="email" value={forgotEmail} onChange={(e) => setForgotEmail(e.target.value)} required autoComplete="email" style={inputSx} />
+            </div>
+            {error && <p style={{ color: "var(--red)", fontSize: 13, marginBottom: 14 }}>{error}</p>}
+            <button type="submit" disabled={loading} style={{ width: "100%", padding: 11, borderRadius: 8, background: "var(--primary)", color: "#fff", fontSize: 14, fontWeight: 600, opacity: loading ? 0.7 : 1, marginBottom: 14 }}>
+              {loading ? "Sending…" : "Send reset link"}
+            </button>
+          </form>
+          <button onClick={() => { setView("login"); setError(null); }} style={{ fontSize: 13, color: "var(--primary)", background: "none", border: "none", cursor: "pointer", padding: 0 }}>
+            Back to sign in
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: "var(--bg)", padding: 24 }}>
-      <div style={{ background: "var(--surface)", padding: 32, borderRadius: 12, maxWidth: 440, width: "100%", border: "1px solid var(--border)", boxShadow: "var(--shadow)" }}>
+    <div style={cardSx}>
+      <div style={innerSx}>
         <h1 style={{ fontSize: 20, fontWeight: 700, marginBottom: 4 }}>Sign in</h1>
         <p style={{ color: "var(--text-2)", fontSize: 14, marginBottom: 24 }}>AI Reporter — Hotel Operations</p>
-
-        {/* Google OAuth — primary sign-in method */}
-        <button
-          onClick={handleGoogleSignIn}
-          disabled={loading}
-          style={{ width: "100%", padding: 11, borderRadius: 8, background: "#fff", color: "#3c4043", fontSize: 14, fontWeight: 600, border: "1px solid var(--border)", display: "flex", alignItems: "center", justifyContent: "center", gap: 10, cursor: "pointer", marginBottom: 20, opacity: loading ? 0.7 : 1 }}
-        >
-          <svg width="18" height="18" viewBox="0 0 18 18" xmlns="http://www.w3.org/2000/svg">
-            <path d="M17.64 9.2c0-.637-.057-1.251-.164-1.84H9v3.481h4.844c-.209 1.125-.843 2.078-1.796 2.717v2.258h2.908c1.702-1.567 2.684-3.875 2.684-6.615z" fill="#4285F4"/>
-            <path d="M9 18c2.43 0 4.467-.806 5.956-2.184l-2.908-2.258c-.806.54-1.837.86-3.048.86-2.344 0-4.328-1.584-5.036-3.711H.957v2.332A8.997 8.997 0 0 0 9 18z" fill="#34A853"/>
-            <path d="M3.964 10.707A5.41 5.41 0 0 1 3.682 9c0-.593.102-1.17.282-1.707V4.961H.957A8.996 8.996 0 0 0 0 9c0 1.452.348 2.827.957 4.039l3.007-2.332z" fill="#FBBC05"/>
-            <path d="M9 3.58c1.321 0 2.508.454 3.44 1.345l2.582-2.58C13.463.891 11.426 0 9 0A8.997 8.997 0 0 0 .957 4.961L3.964 7.293C4.672 5.163 6.656 3.58 9 3.58z" fill="#EA4335"/>
-          </svg>
-          {loading ? "Redirecting…" : "Sign in with Google"}
-        </button>
-
-        {/* Divider */}
-        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 20 }}>
-          <div style={{ flex: 1, height: 1, background: "var(--border)" }} />
-          <span style={{ fontSize: 12, color: "var(--text-2)" }}>or</span>
-          <div style={{ flex: 1, height: 1, background: "var(--border)" }} />
-        </div>
-
-        {/* Email/password fallback */}
         <form onSubmit={handleSubmit}>
           <div style={{ marginBottom: 14 }}>
-            <label style={{ display: "block", fontSize: 12, fontWeight: 600, marginBottom: 5, color: "var(--text-2)" }}>Email</label>
-            <input
-              type="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              required
-              autoComplete="email"
-              style={{ width: "100%", padding: "10px 12px", borderRadius: 8, border: "1px solid var(--border)", fontSize: 14, background: "var(--bg)", color: "var(--text)" }}
-            />
+            <label style={labelSx}>Email</label>
+            <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} required autoComplete="email" style={inputSx} />
           </div>
-          <div style={{ marginBottom: 20 }}>
-            <label style={{ display: "block", fontSize: 12, fontWeight: 600, marginBottom: 5, color: "var(--text-2)" }}>Password</label>
-            <input
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              required
-              autoComplete="current-password"
-              style={{ width: "100%", padding: "10px 12px", borderRadius: 8, border: "1px solid var(--border)", fontSize: 14, background: "var(--bg)", color: "var(--text)" }}
-            />
+          <div style={{ marginBottom: 8 }}>
+            <label style={labelSx}>Password</label>
+            <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} required autoComplete="current-password" style={inputSx} />
+          </div>
+          <div style={{ textAlign: "right", marginBottom: 20 }}>
+            <button type="button" onClick={() => { setView("forgot"); setForgotEmail(email); setError(null); }} style={{ fontSize: 12, color: "var(--primary)", background: "none", border: "none", cursor: "pointer", padding: 0 }}>
+              Forgot password?
+            </button>
           </div>
           {error && <p style={{ color: "var(--red)", fontSize: 13, marginBottom: 14 }}>{error}</p>}
-          <button
-            type="submit"
-            disabled={loading}
-            style={{ width: "100%", padding: 11, borderRadius: 8, background: "var(--primary)", color: "#fff", fontSize: 14, fontWeight: 600, opacity: loading ? 0.7 : 1 }}
-          >
+          <button type="submit" disabled={loading} style={{ width: "100%", padding: 11, borderRadius: 8, background: "var(--primary)", color: "#fff", fontSize: 14, fontWeight: 600, opacity: loading ? 0.7 : 1 }}>
             {loading ? "Signing in…" : "Sign in"}
           </button>
         </form>
@@ -4374,7 +4391,7 @@ const defaultPageForRole = (role) => {
 };
 
 const AppShell = () => {
-  const { session, logout } = useSession();
+  const { session, logout, needsPasswordReset } = useSession();
   const [page, setPage] = useState("admin");
   const [tweaks, setTweaks] = useState(TWEAK_DEFAULTS);
   const [showTweaks, setShowTweaks] = useState(false);
@@ -4422,6 +4439,7 @@ const AppShell = () => {
     window.parent.postMessage({ type: "__edit_mode_set_keys", edits: next }, "*");
   };
 
+  if (needsPasswordReset) return <ResetPasswordForm />;
   if (!session) return <LoginWall />;
   if (session.role === "participant") return <ParticipantPortal />;
 
@@ -4503,7 +4521,9 @@ const AppShell = () => {
 
 const App = () => (
   <SessionProvider>
-    <AppShell />
+    <AppDataProvider>
+      <AppShell />
+    </AppDataProvider>
   </SessionProvider>
 );
 
