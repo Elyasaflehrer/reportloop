@@ -1,7 +1,8 @@
 import { z } from 'zod'
 
 const schema = z.object({
-  node_env: z.enum(['development', 'production', 'test']).default('development'),
+  node_env:  z.enum(['development', 'production', 'test']).default('development'),
+  log_level: z.enum(['debug', 'info', 'warn', 'error']).default('info'),
 
   app: z.object({
     port:           z.coerce.number().default(3000),
@@ -64,7 +65,8 @@ const twilioConfigured =
   process.env.TWILIO_FROM_NUMBER
 
 export const config = schema.parse({
-  node_env: process.env.NODE_ENV,
+  node_env:  process.env.NODE_ENV,
+  log_level: process.env.LOG_LEVEL,
 
   app: {
     port:           process.env.PORT,

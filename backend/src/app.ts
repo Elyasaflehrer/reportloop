@@ -2,6 +2,7 @@ import Fastify, { type FastifyInstance } from 'fastify'
 import cors from '@fastify/cors'
 import helmet from '@fastify/helmet'
 import rateLimit from '@fastify/rate-limit'
+import formbody from '@fastify/formbody'
 import { config } from './config.js'
 import { healthRoutes } from './routes/health.js'
 import { authRoutes } from './routes/auth.js'
@@ -17,9 +18,9 @@ import type { ISmsProvider } from './services/sms/sms.provider.interface.js'
 export async function buildApp(): Promise<FastifyInstance> {
   const app = Fastify({
     logger: {
-      level: config.node_env === 'test' ? 'silent' : 'info',
+      level: config.node_env === 'test' ? 'silent' : config.log_level,
       ...(config.node_env === 'development' && {
-        transport: { target: 'pino-pretty', options: { colorize: true } },
+        transport: { target: 'pino-pretty', options: { colorize: true, singleLine: true } },
       }),
     },
     genReqId: () => crypto.randomUUID(),
@@ -29,6 +30,7 @@ export async function buildApp(): Promise<FastifyInstance> {
   // ─── PLUGINS ──────────────────────────────────────────────────────────────
 
   await app.register(helmet)
+  await app.register(formbody)
 
   await app.register(cors, {
     origin: config.app.frontendOrigin,
