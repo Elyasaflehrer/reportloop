@@ -115,14 +115,18 @@ export const AdminGroupsTab = () => {
             <div><div style={{ fontSize: 12, fontWeight: 600, marginBottom: 4 }}>Description (optional)</div><input value={modal.description || ''} onChange={e => setModal(x => x ? { ...x, description: e.target.value } : x)} style={inputSx} /></div>
             {modal.id != null && users.length > 0 && (
               <>
-                <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-3)', marginTop: 4 }}>Members</div>
+                <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-3)', marginTop: 4 }}>Recipients</div>
+                <div style={{ fontSize: 12, color: 'var(--text-3)', marginBottom: 6 }}>Checked users (participants &amp; viewers) become visible to managers assigned to this group.</div>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 200, overflowY: 'auto' }}>
-                  {users.map(u => (
+                  {users.filter(u => u.role === 'participant' || u.role === 'viewer').map(u => (
                     <label key={u.id} style={{ fontSize: 14, display: 'flex', alignItems: 'center', gap: 8 }}>
                       <input type="checkbox" checked={editingMemberIds.has(u.id)} onChange={() => toggleMember(u.id)} />
-                      {u.name} ({u.role})
+                      {u.name} <span style={{ fontSize: 12, color: 'var(--text-3)' }}>({u.role}{u.phone ? ` · ${u.phone}` : ''})</span>
                     </label>
                   ))}
+                  {users.filter(u => u.role === 'participant' || u.role === 'viewer').length === 0 && (
+                    <div style={{ fontSize: 13, color: 'var(--text-3)' }}>No participants or viewers yet.</div>
+                  )}
                 </div>
               </>
             )}
