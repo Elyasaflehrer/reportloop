@@ -7,23 +7,26 @@ How to run the ReportLoop backend and frontend together on your machine.
 ## Prerequisites (one-time)
 
 - **Node.js** v18 or higher
-- **Redis** — install locally or use a free cloud instance
+- **Redis** — Docker container, local install, or a free cloud instance
 
-### Install and start Redis locally
+### Start Redis (this project uses Docker)
 
-**Linux (WSL):**
+```bash
+docker run -d --name reportloop-redis -p 6379:6379 redis:alpine
+```
+
+If the container already exists, just start it:
+```bash
+docker start reportloop-redis
+```
+
+**Alternative — local install (Linux/WSL):**
 ```bash
 sudo apt install redis-server
 sudo service redis-server start
 ```
 
-**Mac:**
-```bash
-brew install redis
-brew services start redis
-```
-
-**Or use Upstash (no install needed):** create a free database at [upstash.com](https://upstash.com) and use the Redis URL they give you.
+**Alternative — Upstash (no install needed):** create a free database at [upstash.com](https://upstash.com) and use the Redis URL they give you.
 
 ---
 
@@ -47,7 +50,7 @@ Open `.env` and fill in the required values:
 | `SUPABASE_JWT_SECRET` | Supabase → Project Settings → API → JWT Settings → JWT Secret |
 | `REDIS_URL` | `redis://localhost:6379` if running locally, or your Upstash URL |
 | `APP_BASE_URL` | `http://localhost:3000` |
-| `FRONTEND_ORIGIN` | `http://localhost:8080` |
+| `FRONTEND_ORIGIN` | `http://localhost:8081` (Vite falls back to 8081 if 8080 is taken) |
 
 ### Optional (app starts without these, features disabled)
 
@@ -68,8 +71,10 @@ REDIS_URL=redis://localhost:6379
 NODE_ENV=development
 PORT=3000
 APP_BASE_URL=http://localhost:3000
-FRONTEND_ORIGIN=http://localhost:8080
+FRONTEND_ORIGIN=http://localhost:8081
 ```
+
+> **Note:** Vite is configured for port 8080 but falls back to 8081 if 8080 is already in use on this machine. Check which port Vite actually started on and make sure `FRONTEND_ORIGIN` matches, then restart the backend.
 
 ---
 
@@ -101,17 +106,18 @@ Confirm it's working by opening `http://localhost:3000/health` in your browser �
 
 ---
 
-## Step 4 — Serve the frontend
+## Step 4 — Start the frontend (Vite dev server)
 
 In a **new terminal** (keep the backend running):
 
 ```bash
-npx serve /home/elyasaf/workstation/reportloop -l 8080
+cd frontend
+npm run dev
 ```
 
-Then open: **`http://localhost:8080/AI_Reporter.html`**
+Vite will print the actual URL it started on — it's usually `http://localhost:8081` on this machine because port 8080 is already in use.
 
-> The frontend must be served over HTTP (not opened as a `file://` URL) because Supabase Auth requires a real URL for redirects.
+> Vite proxies API calls to `http://localhost:3000` automatically. Make sure `FRONTEND_ORIGIN` in `backend/.env` matches the port Vite picked, then restart the backend.
 
 ---
 
@@ -119,8 +125,8 @@ Then open: **`http://localhost:8080/AI_Reporter.html`**
 
 Go to your Supabase project → **Authentication → URL Configuration** and set:
 
-- **Site URL:** `http://localhost:8080`
-- **Redirect URLs:** add `http://localhost:8080/**`
+- **Site URL:** `http://localhost:8081`
+- **Redirect URLs:** add `http://localhost:8081/**`
 
 This is required for password reset and invite emails to redirect back to the app correctly.
 
@@ -165,10 +171,11 @@ npm run dev
 
 **Terminal 2 — Frontend:**
 ```bash
-npx serve /home/elyasaf/workstation/reportloop -l 8080
+cd /home/elyasaf/workstation/reportloop/frontend
+npm run dev
 ```
 
-Then open `http://localhost:8080/AI_Reporter.html`.
+Then open the URL Vite prints in the terminal (typically `http://localhost:8081` on this machine).
 
 ---
 
@@ -194,7 +201,7 @@ Then open `http://localhost:8080/AI_Reporter.html`.
 ## Troubleshooting
 
 **`CORS` error in browser console**
-Make sure `FRONTEND_ORIGIN=http://localhost:8080` is set in your `.env` and the backend was restarted after changing it.
+`FRONTEND_ORIGIN` in `backend/.env` must match the port Vite is actually running on (check the terminal — it's `8081` on this machine if `8080` is taken). Restart the backend after changing it.
 
 **`401 Unauthorized` on API calls**
 Your Supabase JWT secret in `.env` doesn't match the one in the Supabase dashboard. Go to Supabase → Project Settings → API → JWT Settings → copy the JWT Secret exactly.
@@ -206,4 +213,4 @@ The Supabase Site URL is pointing to the wrong address. Check Step 5 above.
 Your `DATABASE_URL` is wrong or you're not connected to the internet (Supabase is a hosted database).
 
 **Redis connection error**
-Redis isn't running. Start it with `sudo service redis-server start` (Linux) or `brew services start redis` (Mac).
+Start the Docker container: `docker start reportloop-redis`. If it doesn't exist yet, run `docker run -d --name reportloop-redis -p 6379:6379 redis:alpine`.

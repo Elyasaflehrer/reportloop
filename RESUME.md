@@ -2,31 +2,32 @@
 
 ## Current Status
 
-**Phase 1 — Foundation: complete** (all 8 steps implemented and committed)  
-**Blocker:** DB connection error when running locally — fix this before continuing to Phase 2.
+**Phase 0 — Frontend Cleanup: ✅ Complete**  
+**Phase 1 — Foundation: ✅ Complete**  
+**Phase 2 — CRUD APIs: ✅ Complete**  
+**Phase 3 — Broadcast Engine: ✅ Complete**  
+**Phase 4 — Webhooks & Conversations: ✅ Complete**  
+**Phase 5 — Frontend Cutover: ✅ Complete (1 uncommitted change pending)**  
+**Phase 6 — Production Hardening: 🔲 Not started**
 
 ---
 
-## Immediate Fix Needed — DB Connection Error
+## Uncommitted Changes (commit before switching tasks)
 
-When running `npm run dev` and hitting `GET /health`, Redis returns `ok` but DB returns `error`.
+`AI_Reporter.html` has staged changes that were NOT committed yet. Run:
 
-**Step 1 — Check if Supabase project is paused**  
-Go to your Supabase dashboard. Free tier projects pause after inactivity.  
-If you see "Restore project" — click it and wait ~1 minute for it to wake up, then retry.
-
-**Step 2 — Verify DATABASE_URL format in `backend/.env`**  
-It must look exactly like this (including `?pgbouncer=true` at the end):
-```
-DATABASE_URL=postgresql://postgres.[project-ref]:[password]@aws-0-[region].pooler.supabase.com:6543/postgres?pgbouncer=true
-DATABASE_URL_DIRECT=postgresql://postgres.[project-ref]:[password]@aws-0-[region].pooler.supabase.com:5432/postgres
-```
-
-**Step 3 — Verify the connection works**  
 ```bash
-curl http://localhost:3000/health
-# Expected: { "status": "ok", "db": "ok", "redis": "ok", "uptime": ... }
+git add AI_Reporter.html
+git commit -m "Wire ManagerQuestionsPanel and ManagerSchedulePanel to real API; fix participant visibility"
 ```
+
+What these changes include:
+- **ManagerQuestionsPanel** — replaced localStorage stubs with POST/PATCH/DELETE `/questions`
+- **ManagerSchedulePanel** — replaced localStorage stubs with full schedule CRUD API calls; added timezone selector
+- **ManagerParticipantsPanel** — NEW component; added "Participants" tab to manager workspace showing group-scoped participants
+- **BroadcastCompose** — "Questions the AI will ask" preview now uses real questions from AppData
+- **AdminUsersTab** — added "participant" role option to Add User form (phone required, no invite email)
+- **AdminGroupsTab** — removed participants-exclusion filter from group member picker so admins can add participants to groups directly
 
 ---
 
@@ -35,56 +36,66 @@ curl http://localhost:3000/health
 ```bash
 # Start Redis
 docker start reportloop-redis
-# (if container was removed: docker run -d --name reportloop-redis -p 6379:6379 redis:7-alpine)
+# (if removed: docker run -d --name reportloop-redis -p 6379:6379 redis:7-alpine)
 
 # Start backend
 cd /home/elyasaf/workstation/reportloop/backend
 npm run dev
+
+# Serve frontend (in another terminal)
+cd /home/elyasaf/workstation/reportloop
+npx serve . -p 8080
 ```
 
 ---
 
-## Once Health Returns OK — Test Auth Endpoints
+## Key Auth Facts
 
-Get a JWT from the browser console after logging into AI_Reporter.html:
-```javascript
-const { data } = await supabaseClient.auth.getSession()
-console.log(data.session.access_token)
-```
-
-Then test:
-```bash
-TOKEN="your-jwt-here"
-curl -H "Authorization: Bearer $TOKEN" http://localhost:3000/auth/me
-curl -H "Authorization: Bearer $TOKEN" http://localhost:3000/integrations/status
-```
+- JWT is **ES256** (asymmetric). `jwt.verify(token, secret)` does NOT work — always use `supabaseAdmin.auth.getUser(token)`.
+- On first login, `supabase_id` is auto-linked to the DB user row by email lookup.
+- `GET /auth/me` is called by the frontend on every login to get the real DB role (overrides stale JWT metadata).
+- Admin role changes call `supabaseAdmin.auth.admin.updateUserById` to sync JWT metadata immediately.
 
 ---
 
-## After Health Is Confirmed Working
+## Admin Setup Flow (for testing)
 
-1. Commit the remaining uncommitted changes (config.ts fix, dotenv, package.json updates)
-2. Move to **Phase 2 — CRUD APIs**
-
-Phase 2 steps (in order):
-- Step 9:  `GET/POST/PATCH/DELETE /users`
-- Step 10: `GET/POST/PATCH/DELETE /groups` + members + manager links
-- Step 11: `GET/POST/PATCH/DELETE /participants`
-- Step 12: `GET/POST/PATCH/DELETE /questions` + `GET/POST/PATCH/DELETE /schedules`
+1. Admin → **Users & Roles** tab → Add participant (role: participant, phone required)
+2. Admin → **Users & Roles** tab → Find participant row → click "Groups…" → assign to a group
+   — OR —
+   Admin → **Groups** tab → Edit group → member picker now includes participants → add participant
+3. Admin → **Manager Groups** tab → select manager → click "Assign groups…" → pick the group
+4. Manager logs in → **Participants** tab → sees the participant
+5. Manager → **Schedule** tab → Add schedule → Subset mode → participant appears in recipient picker
 
 ---
 
 ## Current Git State
 
 Branch: `dev/claude`  
-Last commit: `74875cc` — Phase 1 complete  
+Last commit: `0f4080b` — Fix session role: call GET /auth/me on login to get role from DB
 
-Uncommitted changes (need to commit before Phase 2):
-- `backend/src/config.ts` — Anthropic made optional
-- `backend/src/index.ts` — dotenv added
-- `backend/src/routes/auth.ts` — integrations status fix
-- `backend/package.json` — dotenv added, pino-pretty added, type:module removed
-- `backend/tsconfig.json` — switched to CommonJS
+Recent commits (Phase 5 work):
+- `0f4080b` — Fix session role: call GET /auth/me on login to get role from DB
+- `dfcbc76` — Fix invite flow: link supabase_id at creation and sync role changes to Supabase
+- `a7172e3` — Fix auth: auto-link supabase_id on first login and remove stale debug log
+- `dc7f198` — Add local development guide and version-2 backlog
+- `5f6c95d` — Phase 5: wire AdminUsersTab, AdminGroupsTab, AdminManagerGroupsTab to real API
+- `fc6566d` — Raise pagination limit cap from 100 to 500 on all list endpoints
+- `4822a77` — Fix JWT auth: replace jwt.verify with supabaseAdmin.auth.getUser
+
+---
+
+## Phase 6 — Production Hardening (Next)
+
+- [ ] Rate limiting on auth and SMS endpoints
+- [ ] Error monitoring (Sentry or similar)
+- [ ] Database connection pooling tuning
+- [ ] Environment variable validation on startup
+- [ ] CORS configuration for production domain
+- [ ] Supabase RLS policies review
+- [ ] Load testing / SMS throughput validation
+- [ ] Logging structured output (already using pino)
 
 ---
 
@@ -93,9 +104,9 @@ Uncommitted changes (need to commit before Phase 2):
 | Phase | Status |
 |---|---|
 | Phase 0 — Frontend Cleanup | ✅ Complete |
-| Phase 1 — Foundation | ✅ Complete (local run pending DB fix) |
-| Phase 2 — CRUD APIs | 🔲 Next |
-| Phase 3 — Broadcast Engine | 🔲 Not started |
-| Phase 4 — Webhooks & Conversations | 🔲 Not started |
-| Phase 5 — Frontend Cutover | 🔲 Not started |
+| Phase 1 — Foundation | ✅ Complete |
+| Phase 2 — CRUD APIs | ✅ Complete |
+| Phase 3 — Broadcast Engine | ✅ Complete |
+| Phase 4 — Webhooks & Conversations | ✅ Complete |
+| Phase 5 — Frontend Cutover | ✅ Complete (1 uncommitted change) |
 | Phase 6 — Production Hardening | 🔲 Not started |
