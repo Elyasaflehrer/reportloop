@@ -91,6 +91,7 @@ export class AnthropicProvider implements IAiProvider {
     const block = response.content[0]
     if (block.type !== 'text') throw new Error('Unexpected AI response type')
 
-    return JSON.parse(block.text) as ExtractAnswersResult
+    const text = block.text.replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/i, '').trim()
+    return JSON.parse(text) as ExtractAnswersResult
   }
 }
