@@ -11,6 +11,7 @@ const SCHEDULE_TIMEZONES = [
   { label: 'Central (CT)',  value: 'America/Chicago' },
   { label: 'Mountain (MT)', value: 'America/Denver' },
   { label: 'Pacific (PT)',  value: 'America/Los_Angeles' },
+  { label: 'Israel (IST)',  value: 'Asia/Jerusalem' },
 ]
 
 type ReviewDraft = {
@@ -23,6 +24,7 @@ export const ManagerSchedulePanel = () => {
   const { schedules, questions, participants, token, refresh } = useAppData()
 
   const [showAddModal, setShowAddModal] = useState(false)
+  const [editingSchedule, setEditingSchedule] = useState<any | null>(null)
   const [label, setLabel] = useState('Weekly send')
   const [day, setDay] = useState('Sunday')
   const [time, setTime] = useState('08:00')
@@ -41,6 +43,19 @@ export const ManagerSchedulePanel = () => {
     setModalQSearch(''); setModalEmpSearch('')
     setNewQIds(new Set(questions.map(q => q.id)))
     setReviewDraft(null); setShowAddModal(true)
+  }
+
+  const openEditModal = (j: any) => {
+    setEditingSchedule(j)
+    setLabel(j.label || '')
+    setDay(j.dayOfWeek)
+    setTime(j.timeOfDay)
+    setTimezone(j.timezone)
+    setMode(j.recipientMode)
+    setSubsetIds(j.employeeIds || [])
+    setNewQIds(new Set(j.questionIds || []))
+    setModalQSearch(''); setModalEmpSearch('')
+    setReviewDraft(null)
   }
 
   const buildDraft = (): ReviewDraft | null => {
@@ -72,6 +87,72 @@ export const ManagerSchedulePanel = () => {
       toastSuccess('Schedule added.')
     } catch (err: any) {
       toastError('Failed to create schedule: ' + err.message)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const saveEdit = async () => {
+    if (!editingSchedule || saving) return
+    if (!String(label || '').trim()) { toastError('Schedule label is required.'); return }
+    setSaving(true)
+    try {
+      const id = editingSchedule.id
+
+      // Patch changed core fields
+      const patch: Record<string, unknown> = {}
+      if (label.trim() !== editingSchedule.label)         patch.label         = label.trim()
+      if (day       !== editingSchedule.dayOfWeek)        patch.dayOfWeek     = day
+      if (time      !== editingSchedule.timeOfDay)        patch.timeOfDay     = time
+      if (timezone  !== editingSchedule.timezone)         patch.timezone      = timezone
+      if (mode      !== editingSchedule.recipientMode)    patch.recipientMode = mode
+      if (Object.keys(patch).length > 0) {
+        await apiFetch(`/schedules/${id}`, token, { method: 'PATCH', body: patch })
+      }
+
+      // Diff questions
+      const origQIds = new Set<number>(editingSchedule.questionIds || [])
+      for (const qid of [...newQIds].filter(q => !origQIds.has(q))) {
+        await apiFetch(`/schedules/${id}/questions`, token, { method: 'POST', body: { questionId: qid } })
+      }
+      for (const qid of [...origQIds].filter(q => !newQIds.has(q))) {
+        await apiFetch(`/schedules/${id}/questions/${qid}`, token, { method: 'DELETE' })
+      }
+
+      // Diff recipients
+      const origRIds = new Set<number>(editingSchedule.employeeIds || [])
+      if (mode === 'subset') {
+        for (const uid of subsetIds.filter(u => !origRIds.has(u))) {
+          await apiFetch(`/schedules/${id}/recipients`, token, { method: 'POST', body: { userId: uid } })
+        }
+        for (const uid of [...origRIds].filter(u => !subsetIds.includes(u))) {
+          await apiFetch(`/schedules/${id}/recipients/${uid}`, token, { method: 'DELETE' })
+        }
+      } else {
+        // Switched to 'all' — remove any existing subset recipients
+        for (const uid of [...origRIds]) {
+          await apiFetch(`/schedules/${id}/recipients/${uid}`, token, { method: 'DELETE' })
+        }
+      }
+
+      await refresh()
+      setEditingSchedule(null)
+      toastSuccess('Schedule updated.')
+    } catch (err: any) {
+      toastError('Failed to update schedule: ' + err.message)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const fireNow = async (id: number, label: string) => {
+    if (!confirm(`Send "${label}" now to all recipients immediately?`)) return
+    setSaving(true)
+    try {
+      await apiFetch(`/schedules/${id}/fire`, token, { method: 'POST', body: {} })
+      toastSuccess('Broadcast enqueued — SMS will be sent shortly.')
+    } catch (err: any) {
+      toastError('Failed to fire schedule: ' + err.message)
     } finally {
       setSaving(false)
     }
@@ -217,6 +298,61 @@ export const ManagerSchedulePanel = () => {
         </Modal>
       )}
 
+      {editingSchedule && (
+        <Modal title="Edit schedule" onClose={() => setEditingSchedule(null)} width={580}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 110px 90px 130px', gap: 10 }}>
+              <input placeholder="Label" value={label} onChange={e => setLabel(e.target.value)} style={inputSx} />
+              <select value={day} onChange={e => setDay(e.target.value)} style={inputSx}>
+                {DAYS.map(d => <option key={d} value={d}>{d}</option>)}
+              </select>
+              <input type="time" value={time} onChange={e => setTime(e.target.value)} style={inputSx} />
+              <select value={timezone} onChange={e => setTimezone(e.target.value)} style={inputSx}>
+                {SCHEDULE_TIMEZONES.map(tz => <option key={tz.value} value={tz.value}>{tz.label}</option>)}
+              </select>
+            </div>
+            <div>
+              <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-3)', marginBottom: 6 }}>Questions to include</div>
+              <input placeholder="Search questions…" value={modalQSearch} onChange={e => setModalQSearch(e.target.value)} style={{ ...inputSx, marginBottom: 8 }} />
+              <div style={{ border: '1px solid var(--border)', borderRadius: 8, maxHeight: 200, overflowY: 'auto', padding: '6px 8px', display: 'flex', flexDirection: 'column', gap: 6 }}>
+                {questions.filter(q => !modalQSearch.trim() || q.text.toLowerCase().includes(modalQSearch.trim().toLowerCase())).map(q => (
+                  <label key={q.id} style={{ fontSize: 14 }}>
+                    <input type="checkbox" checked={newQIds.has(q.id)} onChange={() => toggleNewQuestion(q.id)} /> {q.text}
+                  </label>
+                ))}
+                {questions.length === 0 && <span style={{ fontSize: 13, color: 'var(--text-3)' }}>No questions configured.</span>}
+              </div>
+            </div>
+            <div>
+              <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-3)', marginBottom: 6 }}>Recipients</div>
+              <div style={{ display: 'flex', gap: 16, alignItems: 'center', flexWrap: 'wrap' }}>
+                <label style={{ fontSize: 14 }}><input type="radio" checked={mode === 'all'} onChange={() => setMode('all')} /> All participants ({participants.length})</label>
+                <label style={{ fontSize: 14 }}><input type="radio" checked={mode === 'subset'} onChange={() => setMode('subset')} /> Subset</label>
+              </div>
+              {mode === 'subset' && (
+                <>
+                  <input placeholder="Search participants…" value={modalEmpSearch} onChange={e => setModalEmpSearch(e.target.value)} style={{ ...inputSx, marginTop: 10, marginBottom: 8 }} />
+                  <div style={{ border: '1px solid var(--border)', borderRadius: 8, maxHeight: 200, overflowY: 'auto', padding: '6px 8px', display: 'flex', flexDirection: 'column', gap: 6 }}>
+                    {participants.filter(p => !modalEmpSearch.trim() || (p.name || '').toLowerCase().includes(modalEmpSearch.trim().toLowerCase())).map(p => (
+                      <label key={p.id} style={{ fontSize: 14 }}>
+                        <input type="checkbox" checked={subsetIds.includes(p.id)} onChange={() => toggleSubset(p.id)} /> {p.name}
+                      </label>
+                    ))}
+                    {participants.length === 0 && <span style={{ fontSize: 13, color: 'var(--text-3)' }}>No participants yet.</span>}
+                  </div>
+                </>
+              )}
+            </div>
+            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+              <button type="button" onClick={() => setEditingSchedule(null)} style={{ border: '1px solid var(--border)', borderRadius: 8, padding: '8px 16px' }}>Cancel</button>
+              <button type="button" onClick={saveEdit} disabled={saving} style={{ background: 'var(--primary)', color: '#fff', borderRadius: 8, padding: '8px 16px', fontWeight: 600, opacity: saving ? 0.6 : 1 }}>
+                {saving ? 'Saving…' : 'Save changes'}
+              </button>
+            </div>
+          </div>
+        </Modal>
+      )}
+
       {reviewDraft && (
         <Modal title="Review schedule before save" onClose={() => setReviewDraft(null)} width={520}>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
@@ -255,6 +391,8 @@ export const ManagerSchedulePanel = () => {
                 <label style={{ marginLeft: 'auto', fontSize: 13, display: 'flex', alignItems: 'center', gap: 6 }}>
                   <input type="checkbox" checked={active} onChange={() => patchJob(j.id, { active: !active })} /> Active
                 </label>
+                <button type="button" onClick={() => fireNow(j.id, j.label)} style={{ color: 'var(--green)', fontWeight: 600 }}>Send now</button>
+                <button type="button" onClick={() => openEditModal(j)} style={{ color: 'var(--primary)', fontWeight: 600 }}>Edit</button>
                 <button type="button" onClick={() => remove(j.id)} style={{ color: 'var(--red)', fontWeight: 600 }}>Remove</button>
               </div>
               <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-3)', marginBottom: 4 }}>Questions</div>
