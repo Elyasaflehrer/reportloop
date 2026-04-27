@@ -652,6 +652,7 @@ const Dashboard = ({onNav}) => {
 // Split from AI_Reporter inline bundle.
 
 const BroadcastCompose = ({onSent}) => {
+  const { questions } = useAppData();
   const [selected, setSelected] = useState([1,2,3,4,5]);
   const [step, setStep] = useState("compose"); // compose | confirm | sending | sent
   const [progress, setProgress] = useState(0);
@@ -783,7 +784,10 @@ const BroadcastCompose = ({onSent}) => {
           {/* Questions preview */}
           <div style={{fontSize:11,fontWeight:600,color:"var(--text-3)",textTransform:"uppercase",letterSpacing:"0.05em",marginBottom:8}}>Questions the AI will ask</div>
           <div style={{background:"var(--bg)",borderRadius:8,padding:"12px 14px",marginBottom:20,display:"flex",flexDirection:"column",gap:6}}>
-            {initQuestions.map((q,i)=>(
+            {questions.length === 0 && (
+              <div style={{fontSize:13,color:"var(--text-3)"}}>No questions configured yet.</div>
+            )}
+            {questions.map((q,i)=>(
               <div key={q.id} style={{display:"flex",alignItems:"flex-start",gap:10,fontSize:13,color:"var(--text-2)"}}>
                 <span style={{fontWeight:700,color:"var(--primary)",flexShrink:0,minWidth:16}}>{i+1}.</span>
                 <span style={{lineHeight:1.45}}>{q.text}</span>
@@ -1611,48 +1615,56 @@ const Tab = ({label, active, onClick, count}) => (
 
 // ── Questions tab ──
 const QuestionsTab = () => {
-  const [questions, setQuestions] = useState(initQuestions);
-  const [modal, setModal] = useState(null); // null | {mode:"add"} | {mode:"edit", q}
-  const [draft, setDraft] = useState({text:""});
-  const [deleteId, setDeleteId] = useState(null);
+  const { questions, token, refresh } = useAppData();
+  const [modal,     setModal]     = useState(null); // null | {mode:"add"} | {mode:"edit", q}
+  const [draft,     setDraft]     = useState({ text: "" });
+  const [deleteId,  setDeleteId]  = useState(null);
   const [formError, setFormError] = useState("");
-  const nextId = useRef(questions.length+1);
+  const [saving,    setSaving]    = useState(false);
 
-  const openAdd = () => { setDraft({text:""}); setFormError(""); setModal({mode:"add"}); };
-  const openEdit = q => { setDraft({text:q.text}); setFormError(""); setModal({mode:"edit",q}); };
+  const openAdd  = () => { setDraft({ text: "" }); setFormError(""); setModal({ mode: "add" }); };
+  const openEdit = q  => { setDraft({ text: q.text }); setFormError(""); setModal({ mode: "edit", q }); };
 
-  const save = () => {
-    if(!draft.text.trim()) {
-      setFormError("Question text is required.");
-      return;
-    }
+  const save = async () => {
+    if (!draft.text.trim()) { setFormError("Question text is required."); return; }
     setFormError("");
-    if(modal.mode==="add"){
-      setQuestions(prev=>[...prev,{id:nextId.current++,text:draft.text}]);
-    } else {
-      setQuestions(prev=>prev.map(q=>q.id===modal.q.id?{...q,text:draft.text}:q));
+    setSaving(true);
+    try {
+      if (modal.mode === "add") {
+        await apiFetch("/questions", token, { method: "POST", body: { text: draft.text.trim() } });
+        toastSuccess("Question added.");
+      } else {
+        await apiFetch(`/questions/${modal.q.id}`, token, { method: "PATCH", body: { text: draft.text.trim() } });
+        toastSuccess("Question updated.");
+      }
+      await refresh();
+      setModal(null);
+    } catch (err) {
+      toastError(`Could not save question: ${err.message}`);
+    } finally {
+      setSaving(false);
     }
-    setModal(null);
   };
 
-  const remove = id => { setQuestions(prev=>prev.filter(q=>q.id!==id)); setDeleteId(null); };
-
-  const move = (id, dir) => {
-    setQuestions(prev=>{
-      const idx = prev.findIndex(q=>q.id===id);
-      const next = [...prev];
-      const swap = idx+dir;
-      if(swap<0||swap>=next.length) return prev;
-      [next[idx],next[swap]]=[next[swap],next[idx]];
-      return next;
-    });
+  const remove = async () => {
+    setSaving(true);
+    try {
+      await apiFetch(`/questions/${deleteId}`, token, { method: "DELETE" });
+      await refresh();
+      setDeleteId(null);
+      toastSuccess("Question deleted.");
+    } catch (err) {
+      toastError(`Could not delete question: ${err.message}`);
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
     <div>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
         <div style={{fontSize:13,color:"var(--text-3)"}}>
-          {questions.length} questions · drag to reorder · AI asks them in sequence
+          {questions.length} question{questions.length !== 1 ? "s" : ""} · AI asks them in sequence
         </div>
         <button onClick={openAdd} style={{background:"var(--primary)",color:"#fff",
           borderRadius:8,padding:"8px 16px",fontWeight:600,fontSize:13}}>
@@ -1661,36 +1673,14 @@ const QuestionsTab = () => {
       </div>
 
       <div style={{display:"flex",flexDirection:"column",gap:8}}>
-        {questions.map((q,i)=>(
+        {questions.map((q, i) => (
           <div key={q.id} style={{background:"var(--surface)",border:"1px solid var(--border)",
             borderRadius:8,padding:"13px 14px",display:"flex",alignItems:"flex-start",gap:12,boxShadow:"var(--shadow)"}}>
-            {/* order controls */}
-            <div style={{display:"flex",flexDirection:"column",gap:2,marginTop:1}}>
-              <button
-                type="button"
-                disabled={i===0}
-                onClick={()=>move(q.id,-1)}
-                aria-label={`Move question ${i + 1} up`}
-                style={{fontSize:10,color:i===0?"var(--border-strong)":"var(--text-3)",lineHeight:1,padding:"2px 4px",cursor:i===0?"not-allowed":"pointer",opacity:i===0?0.6:1}}
-              >
-                ▲
-              </button>
-              <button
-                type="button"
-                disabled={i===questions.length-1}
-                onClick={()=>move(q.id,1)}
-                aria-label={`Move question ${i + 1} down`}
-                style={{fontSize:10,color:i===questions.length-1?"var(--border-strong)":"var(--text-3)",lineHeight:1,padding:"2px 4px",cursor:i===questions.length-1?"not-allowed":"pointer",opacity:i===questions.length-1?0.6:1}}
-              >
-                ▼
-              </button>
-            </div>
             <div style={{width:22,height:22,borderRadius:"50%",background:"var(--primary-light)",
               display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0,
               fontSize:11,fontWeight:700,color:"var(--primary)",marginTop:1}}>{i+1}</div>
             <div style={{flex:1}}>
               <div style={{fontSize:14,color:"var(--text)",lineHeight:1.5}}>{q.text}</div>
-
             </div>
             <div style={{display:"flex",gap:4,flexShrink:0}}>
               <button onClick={()=>openEdit(q)} style={{fontSize:12,color:"var(--text-3)",
@@ -1700,31 +1690,31 @@ const QuestionsTab = () => {
             </div>
           </div>
         ))}
+        {questions.length === 0 && (
+          <div style={{fontSize:13,color:"var(--text-3)",padding:"24px 0",textAlign:"center"}}>
+            No questions yet. Add your first question above.
+          </div>
+        )}
       </div>
 
       {/* Add/Edit modal */}
-      {modal&&(
-        <Modal title={modal.mode==="add"?"Add Question":"Edit Question"} onClose={()=>setModal(null)}>
+      {modal && (
+        <Modal title={modal.mode === "add" ? "Add Question" : "Edit Question"} onClose={() => setModal(null)}>
           <div style={{display:"flex",flexDirection:"column",gap:14}}>
             <div>
               <div style={{fontSize:13,fontWeight:500,marginBottom:6}}>Question text</div>
-              <textarea value={draft.text} onChange={e=>setDraft(d=>({...d,text:e.target.value}))}
+              <textarea value={draft.text} onChange={e => setDraft(d => ({ ...d, text: e.target.value }))}
                 rows={3} placeholder="What would you like to ask the manager?"
-                style={{...inputSx,resize:"vertical"}}/>
+                style={{...inputSx, resize:"vertical"}} />
             </div>
             {formError && <div style={{fontSize:12,color:"var(--red)"}}>{formError}</div>}
-
             <div style={{display:"flex",gap:8,justifyContent:"flex-end",marginTop:4}}>
-              <button onClick={()=>setModal(null)} style={{border:"1px solid var(--border)",
+              <button onClick={() => setModal(null)} style={{border:"1px solid var(--border)",
                 borderRadius:8,padding:"9px 18px",fontSize:14,fontWeight:500}}>Cancel</button>
-              <button
-                type="button"
-                disabled={!draft.text.trim()}
-                onClick={save}
-                style={{background:draft.text.trim()?"var(--primary)":"var(--border)",color:draft.text.trim()?"#fff":"var(--text-3)",
-                borderRadius:8,padding:"9px 18px",fontSize:14,fontWeight:600,cursor:draft.text.trim()?"pointer":"not-allowed"}}
-              >
-                {modal.mode==="add"?"Add Question":"Save Changes"}
+              <button type="button" onClick={save} disabled={saving || !draft.text.trim()}
+                style={{background:"var(--primary)",color:"#fff",borderRadius:8,padding:"9px 18px",
+                  fontSize:14,fontWeight:600,opacity:saving||!draft.text.trim()?0.6:1}}>
+                {saving ? "Saving…" : modal.mode === "add" ? "Add Question" : "Save Changes"}
               </button>
             </div>
           </div>
@@ -1732,16 +1722,19 @@ const QuestionsTab = () => {
       )}
 
       {/* Delete confirm */}
-      {deleteId&&(
-        <Modal title="Delete question?" onClose={()=>setDeleteId(null)} width={380}>
+      {deleteId && (
+        <Modal title="Delete question?" onClose={() => setDeleteId(null)} width={380}>
           <div style={{fontSize:14,color:"var(--text-2)",marginBottom:20}}>
-            This question will be removed from the report template.
+            This question will be permanently removed.
           </div>
           <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}>
-            <button onClick={()=>setDeleteId(null)} style={{border:"1px solid var(--border)",
+            <button onClick={() => setDeleteId(null)} style={{border:"1px solid var(--border)",
               borderRadius:8,padding:"9px 18px",fontSize:14,fontWeight:500}}>Cancel</button>
-            <button onClick={()=>remove(deleteId)} style={{background:"var(--red)",color:"#fff",
-              borderRadius:8,padding:"9px 18px",fontSize:14,fontWeight:600}}>Delete</button>
+            <button onClick={remove} disabled={saving}
+              style={{background:"var(--red)",color:"#fff",borderRadius:8,padding:"9px 18px",
+                fontSize:14,fontWeight:600,opacity:saving?0.6:1}}>
+              {saving ? "Deleting…" : "Delete"}
+            </button>
           </div>
         </Modal>
       )}
@@ -2713,10 +2706,13 @@ const AdminUsersTab = () => {
               <option value="admin">admin</option>
               <option value="manager">manager</option>
               <option value="viewer">viewer</option>
+              <option value="participant">participant</option>
             </select>
           </div>
           <div style={{ fontSize: 13, color: "var(--text-2)", padding: "8px 0", alignSelf: "center", gridColumn: "1 / -1" }}>
-            {draft.role === "viewer"
+            {draft.role === "participant"
+              ? "Participants receive SMS prompts — phone is required, no platform login. Assign them to a group after creating."
+              : draft.role === "viewer"
               ? "Viewer access is determined by group membership — add the user to groups after creating them."
               : "An invite email will be sent so the user can set their own password."}
           </div>
@@ -3093,7 +3089,7 @@ const AdminGroupsTab = () => {
   };
 
   const editingId = modal && modal.id != null ? modal.id : null;
-  const platformUsers = users.filter(u => u.role !== "participant");
+  const platformUsers = users;
 
   const isGroupModalDirty = (m) => {
     if (!m || !m.__baseline) return false;
@@ -3659,11 +3655,13 @@ const ManagerWorkspace = () => {
       >
         <Tab label="Questions" active={tab === "questions"} onClick={() => setTab("questions")} />
         <Tab label="Schedule" active={tab === "schedule"} onClick={() => setTab("schedule")} />
+        <Tab label="Participants" active={tab === "participants"} onClick={() => setTab("participants")} />
         <Tab label="Correspondences" active={tab === "corr"} onClick={() => setTab("corr")} />
       </div>
 
-      {tab === "questions" && <ManagerQuestionsPanel managerId={mid} />}
-      {tab === "schedule" && <ManagerSchedulePanel managerId={mid} />}
+      {tab === "questions" && <ManagerQuestionsPanel />}
+      {tab === "schedule" && <ManagerSchedulePanel />}
+      {tab === "participants" && <ManagerParticipantsPanel />}
       {tab === "corr" && (
         <History
           managerFilterId={mid}
@@ -3675,57 +3673,70 @@ const ManagerWorkspace = () => {
   );
 };
 
-const ManagerQuestionsPanel = ({ managerId }) => {
-  const [all, setAll] = useState(() => loadManagerQuestions());
-  const list = all[managerId] || [];
-  const [text, setText] = useState("");
-  const [edit, setEdit] = useState(null); // { id, text }
+const ManagerQuestionsPanel = () => {
+  const { questions, token, refresh } = useAppData();
+  const [text,    setText]   = useState("");
+  const [edit,    setEdit]   = useState(null); // { id, text, __baselineText }
   const [qSearch, setQSearch] = useState("");
+  const [saving,  setSaving] = useState(false);
 
-  const persistList = (nextList) => {
-    const next = { ...all, [managerId]: nextList };
-    setAll(next);
-    saveManagerQuestions(next);
-  };
-
-  const add = () => {
-    if (!text.trim()) {
-      toastError("Question text is required.");
-      return;
+  const add = async () => {
+    if (!text.trim()) { toastError("Question text is required."); return; }
+    setSaving(true);
+    try {
+      await apiFetch("/questions", token, { method: "POST", body: { text: text.trim() } });
+      await refresh();
+      setText("");
+      toastSuccess("Question added.");
+    } catch (err) {
+      toastError(`Could not add question: ${err.message}`);
+    } finally {
+      setSaving(false);
     }
-    const id = Math.max(0, ...list.map((q) => q.id)) + 1;
-    persistList([...list, { id, text: text.trim() }]);
-    setText("");
-    toastSuccess("Question added.");
   };
 
-  const remove = (id) => {
-    persistList(list.filter((q) => q.id !== id));
-    toastSuccess("Question removed.");
-  };
-
-  const saveEdit = () => {
-    if (!edit || !edit.text.trim()) {
-      toastError("Could not save question: text is required.");
-      return;
+  const remove = async (id) => {
+    setSaving(true);
+    try {
+      await apiFetch(`/questions/${id}`, token, { method: "DELETE" });
+      await refresh();
+      toastSuccess("Question removed.");
+    } catch (err) {
+      toastError(`Could not remove question: ${err.message}`);
+    } finally {
+      setSaving(false);
     }
-    persistList(list.map((q) => (q.id === edit.id ? { ...q, text: edit.text.trim() } : q)));
-    setEdit(null);
-    toastSuccess("Question updated.");
   };
 
-  const filteredList = list.filter((q) =>
+  const saveEdit = async () => {
+    if (!edit?.text.trim()) { toastError("Could not save question: text is required."); return; }
+    setSaving(true);
+    try {
+      await apiFetch(`/questions/${edit.id}`, token, { method: "PATCH", body: { text: edit.text.trim() } });
+      await refresh();
+      setEdit(null);
+      toastSuccess("Question updated.");
+    } catch (err) {
+      toastError(`Could not save question: ${err.message}`);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const filteredList = questions.filter((q) =>
     !qSearch.trim() || (q.text || "").toLowerCase().includes(qSearch.trim().toLowerCase())
   );
 
   return (
     <div style={{ maxWidth: 640 }}>
       <div style={{ marginBottom: 12, fontSize: 12, color: "var(--text-3)" }}>
-        {list.length} question{list.length !== 1 ? "s" : ""} · All optional
+        {questions.length} question{questions.length !== 1 ? "s" : ""} · All optional
       </div>
       <div style={{ display: "flex", gap: 8, marginBottom: 14 }}>
-        <input placeholder="New question text" value={text} onChange={(e) => setText(e.target.value)} style={inputSx} />
-        <button type="button" onClick={add} style={{ background: "var(--primary)", color: "#fff", borderRadius: 8, padding: "0 16px", fontWeight: 600 }}>
+        <input placeholder="New question text" value={text} onChange={(e) => setText(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && add()} style={inputSx} />
+        <button type="button" onClick={add} disabled={saving}
+          style={{ background: "var(--primary)", color: "#fff", borderRadius: 8, padding: "0 16px", fontWeight: 600, opacity: saving ? 0.6 : 1 }}>
           Add
         </button>
       </div>
@@ -3737,53 +3748,44 @@ const ManagerQuestionsPanel = ({ managerId }) => {
           <div key={q.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "12px 14px", borderBottom: "1px solid var(--border)", fontSize: 14 }}>
             <span>{q.text}</span>
             <div style={{ display: "flex", gap: 8 }}>
-              <button
-                type="button"
-                onClick={() =>
-                  setEdit({
-                    id: q.id,
-                    text: q.text,
-                    __baselineText: q.text,
-                  })
-                }
-                style={{ fontWeight: 600, color: "var(--primary)", fontSize: 13 }}
-              >
+              <button type="button" onClick={() => setEdit({ id: q.id, text: q.text, __baselineText: q.text })}
+                style={{ fontWeight: 600, color: "var(--primary)", fontSize: 13 }}>
                 Edit
               </button>
-              <button type="button" onClick={() => remove(q.id)} style={{ color: "var(--red)", fontWeight: 600 }}>
+              <button type="button" onClick={() => remove(q.id)} disabled={saving}
+                style={{ color: "var(--red)", fontWeight: 600, opacity: saving ? 0.6 : 1 }}>
                 Remove
               </button>
             </div>
           </div>
         ))}
-        {filteredList.length === 0 && <div style={{ padding: 14, color: "var(--text-3)", fontSize: 14 }}>No questions match.</div>}
+        {filteredList.length === 0 && (
+          <div style={{ padding: 14, color: "var(--text-3)", fontSize: 14 }}>
+            {questions.length === 0 ? "No questions yet — add your first question above." : "No questions match."}
+          </div>
+        )}
       </div>
       {edit && (
         <Modal
           title="Edit question"
           onClose={() => {
-            const dirty = String(edit.text || "").trim() !== String(edit.__baselineText || "").trim();
+            const dirty = edit.text.trim() !== edit.__baselineText.trim();
             if (dirty && !confirmDiscardUnsaved("question editor")) return;
             setEdit(null);
           }}
           width={440}
         >
           <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-            <textarea value={edit.text} onChange={(e) => setEdit((x) => ({ ...x, text: e.target.value }))} rows={3} style={{ ...inputSx, resize: "vertical" }} />
+            <textarea value={edit.text} onChange={(e) => setEdit((x) => ({ ...x, text: e.target.value }))}
+              rows={3} style={{ ...inputSx, resize: "vertical" }} />
             <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
-              <button
-                type="button"
-                onClick={() => {
-                  const dirty = String(edit.text || "").trim() !== String(edit.__baselineText || "").trim();
-                  if (dirty && !confirmDiscardUnsaved("question editor")) return;
-                  setEdit(null);
-                }}
-                style={{ border: "1px solid var(--border)", borderRadius: 8, padding: "8px 16px" }}
-              >
+              <button type="button" onClick={() => setEdit(null)}
+                style={{ border: "1px solid var(--border)", borderRadius: 8, padding: "8px 16px" }}>
                 Cancel
               </button>
-              <button type="button" onClick={saveEdit} style={{ background: "var(--primary)", color: "#fff", borderRadius: 8, padding: "8px 16px", fontWeight: 600 }}>
-                Save
+              <button type="button" onClick={saveEdit} disabled={saving}
+                style={{ background: "var(--primary)", color: "#fff", borderRadius: 8, padding: "8px 16px", fontWeight: 600, opacity: saving ? 0.6 : 1 }}>
+                {saving ? "Saving…" : "Save"}
               </button>
             </div>
           </div>
@@ -3793,40 +3795,117 @@ const ManagerQuestionsPanel = ({ managerId }) => {
   );
 };
 
-const ManagerSchedulePanel = ({ managerId }) => {
-  const [all, setAll] = useState(() => loadManagerSchedules());
-  const list = all[managerId] || [];
-  const roster = employeesForManager(managerId);
-  const questions = loadManagerQuestions()[managerId] || [];
+const ManagerParticipantsPanel = () => {
+  const { participants, groups } = useAppData();
+  const [search, setSearch] = useState("");
+
+  const groupNamesByUserId = React.useMemo(() => {
+    const map = {};
+    groups.forEach(g => {
+      (g.memberIds || []).forEach(uid => {
+        if (!map[uid]) map[uid] = [];
+        map[uid].push(g.name);
+      });
+    });
+    return map;
+  }, [groups]);
+
+  const filtered = participants.filter(p => {
+    if (!search.trim()) return true;
+    const q = search.trim().toLowerCase();
+    return (p.name || "").toLowerCase().includes(q) || (p.phone || "").includes(q);
+  });
+
+  return (
+    <div style={{ maxWidth: 720 }}>
+      <p style={{ color: "var(--text-2)", marginBottom: 16, fontSize: 14 }}>
+        Participants assigned to your groups. Managed by admin — contact your admin to add or remove participants.
+      </p>
+      <input
+        placeholder="Search by name or phone…"
+        value={search}
+        onChange={e => setSearch(e.target.value)}
+        style={{ ...inputSx, marginBottom: 16, maxWidth: 320 }}
+      />
+      <div style={{ border: "1px solid var(--border)", borderRadius: 10, overflow: "hidden" }}>
+        {filtered.length === 0 && participants.length === 0 && (
+          <div style={{ padding: "24px", textAlign: "center", color: "var(--text-3)", fontSize: 14 }}>
+            No participants assigned to your groups yet. Ask your admin to assign participants.
+          </div>
+        )}
+        {filtered.length === 0 && participants.length > 0 && (
+          <div style={{ padding: "24px", textAlign: "center", color: "var(--text-3)", fontSize: 14 }}>
+            No participants match search.
+          </div>
+        )}
+        {filtered.map(p => (
+          <div key={p.id} style={{ padding: "12px 14px", borderBottom: "1px solid var(--border)", display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontWeight: 600, fontSize: 14 }}>{p.name}</div>
+              <div style={{ fontSize: 12, color: "var(--text-3)", fontFamily: "ui-monospace,monospace" }}>{maskPhone(p.phone)}</div>
+              {(groupNamesByUserId[p.id] || []).length > 0 && (
+                <div style={{ fontSize: 11, color: "var(--text-2)", marginTop: 2 }}>
+                  Groups: {(groupNamesByUserId[p.id] || []).join(", ")}
+                </div>
+              )}
+            </div>
+            <span style={{
+              fontSize: 11,
+              fontWeight: 700,
+              textTransform: "uppercase",
+              letterSpacing: "0.03em",
+              borderRadius: 99,
+              padding: "2px 8px",
+              background: p.active ? "var(--green-bg)" : "var(--border)",
+              color: p.active ? "var(--green)" : "var(--text-3)",
+            }}>
+              {p.active ? "Active" : "Inactive"}
+            </span>
+            {p.smsOptedOut && (
+              <span style={{ fontSize: 11, fontWeight: 600, color: "var(--amber)", background: "var(--amber-bg)", borderRadius: 99, padding: "2px 8px" }}>
+                SMS opt-out
+              </span>
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+};
+
+const SCHEDULE_TIMEZONES = [
+  { label: "Eastern (ET)",  value: "America/New_York" },
+  { label: "Central (CT)",  value: "America/Chicago" },
+  { label: "Mountain (MT)", value: "America/Denver" },
+  { label: "Pacific (PT)",  value: "America/Los_Angeles" },
+];
+
+const ManagerSchedulePanel = () => {
+  const { schedules, questions, participants, token, refresh } = useAppData();
 
   const [showAddModal, setShowAddModal] = useState(false);
   const [label, setLabel] = useState("Weekly send");
   const [day, setDay] = useState("Sunday");
   const [time, setTime] = useState("08:00");
+  const [timezone, setTimezone] = useState("America/New_York");
   const [mode, setMode] = useState("all");
   const [subsetIds, setSubsetIds] = useState([]);
   const [newQIds, setNewQIds] = useState(() => new Set());
   const [modalQSearch, setModalQSearch] = useState("");
   const [modalEmpSearch, setModalEmpSearch] = useState("");
   const [reviewDraft, setReviewDraft] = useState(null);
-  const [undoRemovedJob, setUndoRemovedJob] = useState(null); // { job, expiresAt }
-
-  const persist = (nextList) => {
-    const next = { ...all, [managerId]: nextList };
-    setAll(next);
-    saveManagerSchedules(next);
-  };
+  const [saving, setSaving] = useState(false);
 
   const openAddModal = () => {
-    const qs = loadManagerQuestions()[managerId] || [];
     setLabel("Weekly send");
     setDay("Sunday");
     setTime("08:00");
+    setTimezone("America/New_York");
     setMode("all");
     setSubsetIds([]);
     setModalQSearch("");
     setModalEmpSearch("");
-    setNewQIds(new Set(qs.length ? qs.map((q) => q.id) : [1]));
+    setNewQIds(new Set(questions.map((q) => q.id)));
     setReviewDraft(null);
     setShowAddModal(true);
   };
@@ -3837,11 +3916,12 @@ const ManagerSchedulePanel = ({ managerId }) => {
       return null;
     }
     const picked = questions.filter((q) => newQIds.has(q.id)).map((q) => q.id);
-    const qids = picked.length ? picked : questions.length ? [questions[0].id] : [1];
+    const qids = picked.length ? picked : questions.length ? [questions[0].id] : [];
     return {
       label: String(label || "").trim(),
       day,
       time,
+      timezone,
       active: true,
       recipientMode: mode,
       employeeIds: mode === "subset" ? subsetIds : [],
@@ -3855,61 +3935,108 @@ const ManagerSchedulePanel = ({ managerId }) => {
     setReviewDraft(draft);
   };
 
-  const confirmAddJob = () => {
-    if (!reviewDraft) return;
-    const id = Math.max(0, ...list.map((j) => j.id)) + 1;
-    persist([...list, { id, ...reviewDraft }]);
-    setSubsetIds([]);
-    setShowAddModal(false);
-    setReviewDraft(null);
-    toastSuccess("Schedule added.");
+  const confirmAddJob = async () => {
+    if (!reviewDraft || saving) return;
+    setSaving(true);
+    try {
+      const newSchedule = await apiFetch("/schedules", token, {
+        method: "POST",
+        body: {
+          label: reviewDraft.label,
+          dayOfWeek: reviewDraft.day,
+          timeOfDay: reviewDraft.time,
+          timezone: reviewDraft.timezone,
+          recipientMode: reviewDraft.recipientMode,
+          active: true,
+        },
+      });
+      const newId = newSchedule.id;
+
+      for (const qid of reviewDraft.questionIds) {
+        await apiFetch(`/schedules/${newId}/questions`, token, {
+          method: "POST",
+          body: { questionId: qid },
+        });
+      }
+
+      if (reviewDraft.recipientMode === "subset") {
+        for (const uid of reviewDraft.employeeIds) {
+          await apiFetch(`/schedules/${newId}/recipients`, token, {
+            method: "POST",
+            body: { userId: uid },
+          });
+        }
+      }
+
+      await refresh();
+      setSubsetIds([]);
+      setShowAddModal(false);
+      setReviewDraft(null);
+      toastSuccess("Schedule added.");
+    } catch (err) {
+      toastError("Failed to create schedule: " + err.message);
+    } finally {
+      setSaving(false);
+    }
   };
 
-  const remove = (id) => {
-    const target = list.find((j) => j.id === id);
+  const remove = async (id) => {
+    const target = schedules.find((j) => j.id === id);
     if (!target) return;
     if (!confirm(`Remove schedule "${target.label}"?`)) return;
-    const next = list.filter((j) => j.id !== id);
-    persist(next);
-    const expiresAt = Date.now() + 8000;
-    setUndoRemovedJob({ job: target, expiresAt });
-    window.setTimeout(() => {
-      setUndoRemovedJob((cur) => {
-        if (!cur) return null;
-        return cur.expiresAt === expiresAt ? null : cur;
-      });
-    }, 8200);
-    toastSuccess("Schedule removed.");
+    setSaving(true);
+    try {
+      await apiFetch(`/schedules/${id}`, token, { method: "DELETE" });
+      await refresh();
+      toastSuccess("Schedule removed.");
+    } catch (err) {
+      toastError("Unexpected error: " + err.message);
+    } finally {
+      setSaving(false);
+    }
   };
 
-  const undoRemove = () => {
-    if (!undoRemovedJob) return;
-    const target = undoRemovedJob.job;
-    const restored = [...list, target].sort((a, b) => a.id - b.id);
-    persist(restored);
-    setUndoRemovedJob(null);
-    toastSuccess("Removal undone.");
+  const patchJob = async (id, patch) => {
+    setSaving(true);
+    try {
+      await apiFetch(`/schedules/${id}`, token, {
+        method: "PATCH",
+        body: patch,
+      });
+      await refresh();
+      if (Object.prototype.hasOwnProperty.call(patch, "active")) {
+        toastSuccess(`Schedule ${patch.active ? "activated" : "paused"}.`);
+      }
+    } catch (err) {
+      toastError("Failed to update schedule: " + err.message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const toggleJobQuestion = async (job, qid) => {
+    const cur = new Set(job.questionIds || []);
+    setSaving(true);
+    try {
+      if (cur.has(qid)) {
+        await apiFetch(`/schedules/${job.id}/questions/${qid}`, token, { method: "DELETE" });
+      } else {
+        await apiFetch(`/schedules/${job.id}/questions`, token, {
+          method: "POST",
+          body: { questionId: qid },
+        });
+      }
+      await refresh();
+      toastSuccess("Schedule questions updated.");
+    } catch (err) {
+      toastError("Unexpected error: " + err.message);
+    } finally {
+      setSaving(false);
+    }
   };
 
   const toggleSubset = (empId) => {
     setSubsetIds((s) => (s.includes(empId) ? s.filter((x) => x !== empId) : [...s, empId]));
-  };
-
-  const patchJob = (id, patch) => {
-    persist(list.map((j) => (j.id === id ? { ...j, ...patch } : j)));
-    if (Object.prototype.hasOwnProperty.call(patch, "active")) {
-      toastSuccess(`Schedule ${patch.active ? "activated" : "paused"}.`);
-    }
-  };
-
-  const toggleJobQuestion = (job, qid) => {
-    const cur = new Set(job.questionIds || []);
-    if (cur.has(qid)) cur.delete(qid);
-    else cur.add(qid);
-    const next = [...cur];
-    if (!next.length) return;
-    patchJob(job.id, { questionIds: next });
-    toastSuccess("Schedule questions updated.");
   };
 
   const toggleNewQuestion = (qid) => {
@@ -3931,19 +4058,21 @@ const ManagerSchedulePanel = ({ managerId }) => {
     return (e.name || "").toLowerCase().includes(t) || String(e.id).includes(t);
   };
   const questionsInModal = questions.filter(qModalFilter);
-  const rosterInModal = roster.filter(empModalFilter);
+  const rosterInModal = participants.filter(empModalFilter);
+
   const isAddScheduleDirty = () => {
     const labelDirty = String(label || "").trim() !== "Weekly send";
     const dayDirty = day !== "Sunday";
     const timeDirty = time !== "08:00";
     const modeDirty = mode !== "all";
     const subsetDirty = subsetIds.length > 0;
-    const desiredDefault = new Set((questions.length ? questions : [{ id: 1 }]).map((q) => q.id));
+    const desiredDefault = new Set(questions.map((q) => q.id));
     const draftSet = new Set(newQIds);
     const questionDirty =
       draftSet.size !== desiredDefault.size || [...draftSet].some((id) => !desiredDefault.has(id));
     return labelDirty || dayDirty || timeDirty || modeDirty || subsetDirty || questionDirty;
   };
+
   const requestCloseAddSchedule = () => {
     if (isAddScheduleDirty() && !confirmDiscardUnsaved("schedule editor")) return;
     setReviewDraft(null);
@@ -3951,43 +4080,33 @@ const ManagerSchedulePanel = ({ managerId }) => {
   };
 
   return (
-    <div style={{ maxWidth: 720 }}>
+    <div style={{ maxWidth: 720, opacity: saving ? 0.7 : 1, pointerEvents: saving ? "none" : "auto" }}>
       <p style={{ color: "var(--text-2)", marginBottom: 16, fontSize: 14 }}>
-        Mock schedules (localStorage). Pick which questions to send; toggle active without deleting a row.
+        Schedules decide who receives prompts and which questions are asked each cycle.
       </p>
-      <div style={{ fontSize: 12, color: "var(--text-2)", marginBottom: 12 }}>
-        What this affects: schedules decide who receives prompts and which questions are asked each cycle.
-      </div>
 
       <div style={{ marginBottom: 20 }}>
         <button type="button" onClick={openAddModal} style={{ background: "var(--primary)", color: "#fff", borderRadius: 8, padding: "9px 18px", fontWeight: 600 }}>
           Add schedule…
         </button>
       </div>
-      {undoRemovedJob && (
-        <div style={{ marginBottom: 16, background: "var(--amber-bg)", border: "1px solid var(--amber)", borderRadius: 8, padding: "10px 12px", display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-          <span style={{ fontSize: 13, color: "var(--text)" }}>
-            Removed <b>{undoRemovedJob.job.label}</b>. You can undo for a few seconds.
-          </span>
-          <button type="button" onClick={undoRemove} style={{ fontSize: 12, fontWeight: 700, color: "var(--primary)" }}>
-            Undo
-          </button>
-        </div>
-      )}
 
       {showAddModal && (
-        <Modal title="Add schedule" onClose={requestCloseAddSchedule} width={560}>
+        <Modal title="Add schedule" onClose={requestCloseAddSchedule} width={580}>
           <div style={{ display: "flex", flexDirection: "column", gap: 14, maxHeight: "min(78vh, 640px)" }}>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 120px 100px", gap: 10 }}>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 110px 90px 130px", gap: 10 }}>
               <input placeholder="Label" value={label} onChange={(e) => setLabel(e.target.value)} style={inputSx} />
               <select value={day} onChange={(e) => setDay(e.target.value)} style={inputSx}>
                 {["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"].map((d) => (
-                  <option key={d} value={d}>
-                    {d}
-                  </option>
+                  <option key={d} value={d}>{d}</option>
                 ))}
               </select>
               <input type="time" value={time} onChange={(e) => setTime(e.target.value)} style={inputSx} />
+              <select value={timezone} onChange={(e) => setTimezone(e.target.value)} style={inputSx}>
+                {SCHEDULE_TIMEZONES.map((tz) => (
+                  <option key={tz.value} value={tz.value}>{tz.label}</option>
+                ))}
+              </select>
             </div>
             <div>
               <div style={{ fontSize: 12, fontWeight: 600, color: "var(--text-3)", marginBottom: 6 }}>Questions to include</div>
@@ -4006,7 +4125,7 @@ const ManagerSchedulePanel = ({ managerId }) => {
               <div style={{ fontSize: 12, fontWeight: 600, color: "var(--text-3)", marginBottom: 6 }}>Recipients</div>
               <div style={{ display: "flex", gap: 16, alignItems: "center", flexWrap: "wrap" }}>
                 <label style={{ fontSize: 14 }}>
-                  <input type="radio" checked={mode === "all"} onChange={() => setMode("all")} /> All roster ({roster.length})
+                  <input type="radio" checked={mode === "all"} onChange={() => setMode("all")} /> All participants ({participants.length})
                 </label>
                 <label style={{ fontSize: 14 }}>
                   <input type="radio" checked={mode === "subset"} onChange={() => setMode("subset")} /> Subset
@@ -4014,21 +4133,21 @@ const ManagerSchedulePanel = ({ managerId }) => {
               </div>
               {mode === "subset" && (
                 <>
-                  <input placeholder="Search employees…" value={modalEmpSearch} onChange={(e) => setModalEmpSearch(e.target.value)} style={{ ...inputSx, marginTop: 10, marginBottom: 8 }} />
+                  <input placeholder="Search participants…" value={modalEmpSearch} onChange={(e) => setModalEmpSearch(e.target.value)} style={{ ...inputSx, marginTop: 10, marginBottom: 8 }} />
                   <div style={{ border: "1px solid var(--border)", borderRadius: 8, maxHeight: 200, overflowY: "auto", padding: "6px 8px", display: "flex", flexDirection: "column", gap: 6 }}>
                     {rosterInModal.map((e) => (
                       <label key={e.id} style={{ fontSize: 14 }}>
                         <input type="checkbox" checked={subsetIds.includes(e.id)} onChange={() => toggleSubset(e.id)} /> {e.name}
                       </label>
                     ))}
-                    {roster.length === 0 && <span style={{ fontSize: 13, color: "var(--text-3)" }}>No roster for this partition.</span>}
-                    {roster.length > 0 && rosterInModal.length === 0 && <span style={{ fontSize: 13, color: "var(--text-3)" }}>No employees match search.</span>}
+                    {participants.length === 0 && <span style={{ fontSize: 13, color: "var(--text-3)" }}>No participants yet.</span>}
+                    {participants.length > 0 && rosterInModal.length === 0 && <span style={{ fontSize: 13, color: "var(--text-3)" }}>No participants match search.</span>}
                   </div>
                 </>
               )}
             </div>
             <div style={{ fontSize: 12, color: "var(--text-2)", background: "var(--surface-alt)", border: "1px solid var(--border)", borderRadius: 8, padding: "8px 10px" }}>
-              Recipient scope: <b>{mode === "all" ? "All roster" : "Subset"}</b> · Recipient count: <b>{mode === "all" ? roster.length : subsetIds.length}</b> · Questions selected: <b>{newQIds.size}</b>
+              Recipient scope: <b>{mode === "all" ? "All participants" : "Subset"}</b> · Count: <b>{mode === "all" ? participants.length : subsetIds.length}</b> · Questions selected: <b>{newQIds.size}</b>
             </div>
             <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: "auto", paddingTop: 8 }}>
               <button type="button" onClick={requestCloseAddSchedule} style={{ border: "1px solid var(--border)", borderRadius: 8, padding: "8px 16px" }}>
@@ -4041,6 +4160,7 @@ const ManagerSchedulePanel = ({ managerId }) => {
           </div>
         </Modal>
       )}
+
       {reviewDraft && (
         <Modal title="Review schedule before save" onClose={() => setReviewDraft(null)} width={520}>
           <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
@@ -4049,16 +4169,16 @@ const ManagerSchedulePanel = ({ managerId }) => {
             </div>
             <div style={{ background: "var(--surface-alt)", border: "1px solid var(--border)", borderRadius: 8, padding: "10px 12px", display: "grid", gap: 8, fontSize: 13 }}>
               <div><b>Label:</b> {reviewDraft.label}</div>
-              <div><b>When:</b> {reviewDraft.day} @ {reviewDraft.time}</div>
-              <div><b>Recipients:</b> {reviewDraft.recipientMode === "all" ? `All roster (${roster.length})` : `Subset (${reviewDraft.employeeIds.length})`}</div>
+              <div><b>When:</b> {reviewDraft.day} @ {reviewDraft.time} ({SCHEDULE_TIMEZONES.find((tz) => tz.value === reviewDraft.timezone)?.label ?? reviewDraft.timezone})</div>
+              <div><b>Recipients:</b> {reviewDraft.recipientMode === "all" ? `All participants (${participants.length})` : `Subset (${reviewDraft.employeeIds.length})`}</div>
               <div><b>Questions:</b> {reviewDraft.questionIds.length} selected</div>
             </div>
             <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
               <button type="button" onClick={() => setReviewDraft(null)} style={{ border: "1px solid var(--border)", borderRadius: 8, padding: "8px 16px" }}>
                 Back
               </button>
-              <button type="button" onClick={confirmAddJob} style={{ background: "var(--primary)", color: "#fff", borderRadius: 8, padding: "8px 16px", fontWeight: 600 }}>
-                Confirm and save
+              <button type="button" onClick={confirmAddJob} disabled={saving} style={{ background: "var(--primary)", color: "#fff", borderRadius: 8, padding: "8px 16px", fontWeight: 600, opacity: saving ? 0.6 : 1 }}>
+                {saving ? "Saving…" : "Confirm and save"}
               </button>
             </div>
           </div>
@@ -4066,7 +4186,12 @@ const ManagerSchedulePanel = ({ managerId }) => {
       )}
 
       <div style={{ border: "1px solid var(--border)", borderRadius: 10, overflow: "hidden" }}>
-        {list.map((j) => {
+        {schedules.length === 0 && (
+          <div style={{ padding: "24px", textAlign: "center", color: "var(--text-3)", fontSize: 14 }}>
+            No schedules yet. Click "Add schedule…" to create one.
+          </div>
+        )}
+        {schedules.map((j) => {
           const active = j.active !== false;
           return (
             <div key={j.id} style={{ padding: "12px 14px", borderBottom: "1px solid var(--border)", fontSize: 14 }}>
@@ -4078,9 +4203,9 @@ const ManagerSchedulePanel = ({ managerId }) => {
                   </span>
                 )}
                 <span style={{ color: "var(--text-3)" }}>
-                  {j.day} @ {j.time}
+                  {j.dayOfWeek} @ {j.timeOfDay}
                 </span>
-                <span style={{ color: "var(--text-3)" }}>· recipients: {j.recipientMode === "all" ? "all roster" : `subset (${(j.employeeIds || []).length})`}</span>
+                <span style={{ color: "var(--text-3)" }}>· {j.recipientMode === "all" ? "all participants" : `subset (${(j.employeeIds || []).length})`}</span>
                 <label style={{ marginLeft: "auto", fontSize: 13, display: "flex", alignItems: "center", gap: 6 }}>
                   <input type="checkbox" checked={active} onChange={() => patchJob(j.id, { active: !active })} /> Active
                 </label>
@@ -4100,6 +4225,9 @@ const ManagerSchedulePanel = ({ managerId }) => {
                     {q.text}
                   </label>
                 ))}
+                {questions.length === 0 && (
+                  <span style={{ fontSize: 13, color: "var(--text-3)" }}>No questions configured.</span>
+                )}
               </div>
             </div>
           );
