@@ -333,7 +333,7 @@ export async function schedulesRoutes(app: FastifyInstance) {
         },
       }),
       prisma.user.findFirst({
-        where: { id: body.data.userId, role: 'participant', deletedAt: null },
+        where: { id: body.data.userId, role: { in: ['participant', 'viewer'] }, deletedAt: null },
       }),
     ])
 

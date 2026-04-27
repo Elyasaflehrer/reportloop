@@ -57,7 +57,7 @@ export async function participantsRoutes(app: FastifyInstance) {
       : {}
 
     const where = {
-      role:      'participant' as const,
+      role:      { in: ['participant', 'viewer'] as const },
       deletedAt: null,
       ...scopeFilter,
       ...(active !== undefined && { active: active === 'true' }),
@@ -116,7 +116,7 @@ export async function participantsRoutes(app: FastifyInstance) {
       : {}
 
     const participant = await prisma.user.findFirst({
-      where: { id: participantId, role: 'participant', deletedAt: null, ...scopeFilter },
+      where: { id: participantId, role: { in: ['participant', 'viewer'] }, deletedAt: null, ...scopeFilter },
       select: {
         id:          true,
         name:        true,
@@ -200,7 +200,7 @@ export async function participantsRoutes(app: FastifyInstance) {
       : {}
 
     const existing = await prisma.user.findFirst({
-      where: { id: participantId, role: 'participant', deletedAt: null, ...scopeFilter },
+      where: { id: participantId, role: { in: ['participant', 'viewer'] }, deletedAt: null, ...scopeFilter },
     })
     if (!existing) return reply.status(404).send({ error: 'Participant not found' })
 
@@ -246,7 +246,7 @@ export async function participantsRoutes(app: FastifyInstance) {
       : {}
 
     const existing = await prisma.user.findFirst({
-      where: { id: participantId, role: 'participant', deletedAt: null, ...scopeFilter },
+      where: { id: participantId, role: { in: ['participant', 'viewer'] }, deletedAt: null, ...scopeFilter },
     })
     if (!existing) return reply.status(404).send({ error: 'Participant not found' })
 
