@@ -1,15 +1,12 @@
 import { useSession } from '../context/SessionContext'
+import { useAppData } from '../context/AppDataContext'
 import { StatCard } from './ui/StatCard'
-
-const REPORT_TOPICS = [
-  'Occupancy rate', 'Delinquencies', 'Maintenance issues', 'Rate structure',
-  'Rooms out of service', 'Ready rooms', 'Police calls', 'Holiday preparations', 'Advertising needs',
-]
 
 type Props = { onNav: (page: string) => void }
 
 export const Dashboard = ({ onNav }: Props) => {
   const { session } = useSession()
+  const { questions } = useAppData()
   const now = new Date()
   const hour = now.getHours()
   const greeting = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening'
@@ -48,12 +45,15 @@ export const Dashboard = ({ onNav }: Props) => {
           <div style={{ fontSize: 13, color: 'var(--text-3)' }}>No data yet.</div>
         </div>
         <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--radius)', padding: '20px 22px', boxShadow: 'var(--shadow)' }}>
-          <div style={{ fontWeight: 600, marginBottom: 14 }}>Report Topics Tracked</div>
+          <div style={{ fontWeight: 600, marginBottom: 14 }}>Questions Tracked</div>
+          {questions.length === 0 && (
+            <div style={{ fontSize: 13, color: 'var(--text-3)' }}>No questions configured yet. Add questions in Admin.</div>
+          )}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
-            {REPORT_TOPICS.map((t, i) => (
-              <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13 }}>
+            {questions.map(q => (
+              <div key={q.id} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13 }}>
                 <span style={{ color: 'var(--green)', fontSize: 12 }}>✓</span>
-                <span style={{ color: 'var(--text-2)' }}>{t}</span>
+                <span style={{ color: 'var(--text-2)' }}>{q.text}</span>
               </div>
             ))}
           </div>

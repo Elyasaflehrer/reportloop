@@ -2,11 +2,6 @@ import { useState } from 'react'
 import { useAppData } from '../context/AppDataContext'
 import { Avatar } from './ui/Avatar'
 
-const REPORT_TOPICS = [
-  'Occupancy rate', 'Delinquencies', 'Maintenance issues', 'Rate structure',
-  'Rooms out of service', 'Ready rooms', 'Police calls', 'Holiday preparations', 'Advertising needs',
-]
-
 type Props = { onSent: () => void }
 
 export const BroadcastCompose = ({ onSent }: Props) => {
@@ -51,16 +46,19 @@ export const BroadcastCompose = ({ onSent }: Props) => {
         <div style={{ padding: '14px 16px', borderRadius: 8, border: '2px solid var(--primary)', background: 'var(--primary-light)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <div>
             <div style={{ fontWeight: 600, fontSize: 14 }}>Weekly Operations Report</div>
-            <div style={{ fontSize: 12, color: 'var(--text-3)', marginTop: 2 }}>{REPORT_TOPICS.length} topics · ~5 min conversation</div>
+            <div style={{ fontSize: 12, color: 'var(--text-3)', marginTop: 2 }}>{questions.length} question{questions.length !== 1 ? 's' : ''} · ~5 min conversation</div>
           </div>
           <span style={{ color: 'var(--primary)', fontSize: 12, fontWeight: 600 }}>✓ Selected</span>
         </div>
         <div style={{ marginTop: 16, padding: '14px 16px', borderRadius: 8, background: 'var(--bg)' }}>
-          <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-3)', marginBottom: 10, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Topics AI will cover</div>
+          <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-3)', marginBottom: 10, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Questions AI will ask</div>
+          {questions.length === 0 && (
+            <div style={{ fontSize: 13, color: 'var(--text-3)' }}>No questions configured yet. Add questions in Admin first.</div>
+          )}
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
-            {REPORT_TOPICS.map((t, i) => (
-              <div key={i} style={{ fontSize: 13, color: 'var(--text-2)', display: 'flex', alignItems: 'center', gap: 6 }}>
-                <span style={{ color: 'var(--primary)', fontSize: 10 }}>●</span>{t}
+            {questions.map(q => (
+              <div key={q.id} style={{ fontSize: 13, color: 'var(--text-2)', display: 'flex', alignItems: 'center', gap: 6 }}>
+                <span style={{ color: 'var(--primary)', fontSize: 10 }}>●</span>{q.text}
               </div>
             ))}
           </div>
