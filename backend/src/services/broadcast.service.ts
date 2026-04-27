@@ -14,6 +14,7 @@ export async function runBroadcast(
   smsProvider: ISmsProvider,
   aiProvider:  IAiProvider,
   triggeredBy?: number,
+  force = false,
 ): Promise<void> {
   const schedule = await prisma.schedule.findUnique({
     where:  { id: scheduleId },
@@ -34,19 +35,18 @@ export async function runBroadcast(
   // fireDate is "YYYY-MM-DD" in the schedule's timezone
   const fireDate = DateTime.now().setZone(schedule.timezone).toISODate()!
 
-  // Idempotency — one broadcast per schedule per calendar day
-  const existing = await prisma.broadcast.findUnique({
-    where: { scheduleId_fireDate: { scheduleId, fireDate } },
-  })
-  if (existing) return  // already ran today
+  // Idempotency — one broadcast per schedule per calendar day (skipped for manual sends)
+  if (!force) {
+    const existing = await prisma.broadcast.findUnique({
+      where: { scheduleId_fireDate: { scheduleId, fireDate } },
+    })
+    if (existing) return
+  }
 
-  const broadcast = await prisma.broadcast.create({
-    data: {
-      scheduleId,
-      fireDate,
-      status:      'in_progress',
-      triggeredBy: triggeredBy ?? null,
-    },
+  const broadcast = await prisma.broadcast.upsert({
+    where:  { scheduleId_fireDate: { scheduleId, fireDate } },
+    create: { scheduleId, fireDate, status: 'in_progress', triggeredBy: triggeredBy ?? null },
+    update: { status: 'in_progress', triggeredBy: triggeredBy ?? null },
   })
 
   const participants = await getParticipants(schedule)

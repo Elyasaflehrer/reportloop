@@ -2,6 +2,7 @@ import { type FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { prisma } from '../db.js'
 import { authenticate, requireRole } from '../middleware/rbac.js'
+import { broadcastQueue } from '../jobs/queue.js'
 
 // ─── Validation schemas ───────────────────────────────────────────────────────
 
@@ -368,5 +369,26 @@ export async function schedulesRoutes(app: FastifyInstance) {
     })
 
     return reply.status(204).send()
+  })
+
+  // ─── POST /schedules/:id/fire ──────────────────────────────────────────────
+
+  app.post('/schedules/:id/fire', { preHandler: [authenticate, requireRole('admin', 'manager')] }, async (req, reply) => {
+    const scheduleId = parseInt((req.params as { id: string }).id, 10)
+    if (isNaN(scheduleId)) return reply.status(400).send({ error: 'Invalid schedule id' })
+
+    const schedule = await prisma.schedule.findFirst({
+      where: {
+        id:        scheduleId,
+        deletedAt: null,
+        ...(req.user.role === 'manager' && { managerId: req.user.id }),
+      },
+    })
+    if (!schedule) return reply.status(404).send({ error: 'Schedule not found' })
+
+    const jobId = `broadcast-${scheduleId}-manual-${Date.now()}`
+    await broadcastQueue.add('run', { scheduleId, triggeredBy: req.user.id, force: true }, { jobId })
+
+    return reply.status(202).send({ message: 'Broadcast enqueued' })
   })
 }

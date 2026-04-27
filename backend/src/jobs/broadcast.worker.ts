@@ -13,12 +13,13 @@ export function startBroadcastWorker() {
   const worker = new Worker(
     'broadcast',
     async (job) => {
-      const { scheduleId, triggeredBy } = job.data as {
+      const { scheduleId, triggeredBy, force } = job.data as {
         scheduleId:   number
         triggeredBy?: number
+        force?:       boolean
       }
 
-      await runBroadcast(scheduleId, smsProvider, aiProvider, triggeredBy)
+      await runBroadcast(scheduleId, smsProvider, aiProvider, triggeredBy, force)
     },
     {
       connection:  redis,
