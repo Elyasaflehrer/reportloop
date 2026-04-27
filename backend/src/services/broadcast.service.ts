@@ -93,7 +93,7 @@ async function getParticipants(schedule: {
   if (schedule.recipientMode === 'subset') {
     return prisma.user.findMany({
       where: {
-        role:               'participant',
+        role:              { in: ['participant', 'viewer'] },
         active:             true,
         deletedAt:          null,
         scheduleRecipient: { some: { scheduleId: schedule.id } },
@@ -102,10 +102,10 @@ async function getParticipants(schedule: {
     })
   }
 
-  // 'all' — every participant in every group this manager oversees
+  // 'all' — every participant/viewer in every group this manager oversees
   return prisma.user.findMany({
     where: {
-      role:      'participant',
+      role:      { in: ['participant', 'viewer'] },
       active:    true,
       deletedAt: null,
       groupMembers: {
