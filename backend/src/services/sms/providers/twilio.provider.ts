@@ -30,7 +30,7 @@ export class TwilioProvider implements ISmsProvider {
         to,
         from:           this.cfg.fromNumber,
         body,
-        statusCallback: `${config.app.baseUrl}/webhooks/twilio/status`,
+        statusCallback: `${config.app.baseUrl}/webhooks/twilio`,
       })
       return message.sid
     } catch (err: any) {
