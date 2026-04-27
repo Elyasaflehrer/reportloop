@@ -12,6 +12,7 @@ import { participantsRoutes } from './routes/participants.js'
 import { questionsRoutes } from './routes/questions.js'
 import { schedulesRoutes } from './routes/schedules.js'
 import { webhooksRoutes } from './routes/webhooks.js'
+import { broadcastsRoutes } from './routes/broadcasts.js'
 import { createSmsProvider } from './services/sms/sms.factory.js'
 import type { ISmsProvider } from './services/sms/sms.provider.interface.js'
 
@@ -78,6 +79,7 @@ export async function buildApp(): Promise<FastifyInstance> {
   await app.register(participantsRoutes)
   await app.register(questionsRoutes)
   await app.register(schedulesRoutes)
+  await app.register(broadcastsRoutes)
 
   if (config.twilio) {
     const smsProvider: ISmsProvider = createSmsProvider()
