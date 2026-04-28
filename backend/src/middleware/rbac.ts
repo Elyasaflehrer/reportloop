@@ -53,7 +53,7 @@ export async function authenticate(req: FastifyRequest, reply: FastifyReply) {
         where:  { id: unlinked.id },
         data:   { supabaseId: supabaseUser.id },
         select: { id: true, supabaseId: true, name: true, email: true, role: true },
-      }) as typeof user
+      })
     }
   }
 

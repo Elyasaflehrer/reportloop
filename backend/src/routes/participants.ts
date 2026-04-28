@@ -1,5 +1,6 @@
 import { type FastifyInstance } from 'fastify'
 import { z } from 'zod'
+import { type UserRole } from '@prisma/client'
 import { prisma } from '../db.js'
 import { authenticate, requireRole } from '../middleware/rbac.js'
 
@@ -57,7 +58,7 @@ export async function participantsRoutes(app: FastifyInstance) {
       : {}
 
     const where = {
-      role:      { in: ['participant', 'viewer'] as const },
+      role:      { in: ['participant', 'viewer'] as UserRole[] },
       deletedAt: null,
       ...scopeFilter,
       ...(active !== undefined && { active: active === 'true' }),
