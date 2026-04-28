@@ -40,7 +40,7 @@ export async function buildApp(): Promise<FastifyInstance> {
 
   await app.register(rateLimit, {
     global: true,
-    max: 100,
+    max: config.rateLimits.globalMax,
     timeWindow: '1 minute',
     errorResponseBuilder: (_req, context) => ({
       error: {

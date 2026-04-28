@@ -1,6 +1,7 @@
 import { type FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { prisma } from '../db.js'
+import { config } from '../config.js'
 import { authenticate, requireRole } from '../middleware/rbac.js'
 import { broadcastQueue } from '../jobs/queue.js'
 
@@ -373,7 +374,7 @@ export async function schedulesRoutes(app: FastifyInstance) {
 
   // ─── POST /schedules/:id/fire ──────────────────────────────────────────────
 
-  app.post('/schedules/:id/fire', { preHandler: [authenticate, requireRole('admin', 'manager')] }, async (req, reply) => {
+  app.post('/schedules/:id/fire', { config: { rateLimit: { max: config.rateLimits.fireMax, timeWindow: '1 minute' } }, preHandler: [authenticate, requireRole('admin', 'manager')] }, async (req, reply) => {
     const scheduleId = parseInt((req.params as { id: string }).id, 10)
     if (isNaN(scheduleId)) return reply.status(400).send({ error: 'Invalid schedule id' })
 

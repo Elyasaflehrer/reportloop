@@ -57,6 +57,11 @@ const schema = z.object({
     stuckTimeoutMinutes:     z.coerce.number().default(30),
     retentionDays:           z.coerce.number().default(0),
   }),
+
+  rateLimits: z.object({
+    globalMax: z.coerce.number().default(100),
+    fireMax:   z.coerce.number().default(5),
+  }),
 })
 
 const twilioConfigured =
@@ -118,6 +123,11 @@ export const config = schema.parse({
     reminderCount:           process.env.CONVERSATION_REMINDER_COUNT,
     stuckTimeoutMinutes:     process.env.CONVERSATION_STUCK_TIMEOUT_MINUTES,
     retentionDays:           process.env.CONVERSATION_RETENTION_DAYS,
+  },
+
+  rateLimits: {
+    globalMax: process.env.RATE_LIMIT_GLOBAL_MAX,
+    fireMax:   process.env.RATE_LIMIT_FIRE_MAX,
   },
 })
 
