@@ -992,36 +992,19 @@ Goal: the system is safe, observable, and recoverable before go-live.
 
 ### Step 24 — Supabase RLS policies
 
-**What:**  
-Write Row Level Security policies on all tenant-scoped tables in Supabase.
-
-**Why both RLS + route-layer RBAC:**  
-Route layer is the first line of defense (fast, flexible). RLS is defense in depth — even if a bug in our code queries the wrong data, Postgres itself rejects the read. Two independent layers means a bug in one doesn't become a data breach.
-
-**Example RLS policy for `Conversation`:**
-```sql
-CREATE POLICY "managers_see_own_conversations" ON conversations
-  FOR SELECT USING (
-    broadcast_id IN (
-      SELECT b.id FROM broadcasts b
-      JOIN schedules s ON s.id = b.schedule_id
-      WHERE s.manager_id = auth.uid()
-    )
-  );
-```
+> **Moved to version-2.md.** Not required for v1 go-live — route-layer RBAC is the active guard. RLS is defense-in-depth deferred to v2.
 
 ---
 
 ### Step 25 — Rate limiting, CORS, and security headers
 
-**What:**  
-- `@fastify/rate-limit` on `/auth/*` (10 req/min) and `/broadcasts/trigger` (5 req/min).
-- CORS restricted to `FRONTEND_ORIGIN` per environment.
-- `@fastify/helmet` for security headers (CSP, HSTS, etc.).
+**Done in v1:**
+- `@fastify/helmet` — registered, all security headers active (CSP, HSTS, etc.)
+- `@fastify/cors` — restricted to `FRONTEND_ORIGIN` only
+- `@fastify/rate-limit` — global 100 req/min, configurable via `RATE_LIMIT_GLOBAL_MAX`
+- `POST /schedules/:id/fire` — tighter limit of 5 req/min, configurable via `RATE_LIMIT_FIRE_MAX`
 
-**Why rate limits on those endpoints specifically:**  
-- `/auth/*` — brute-force protection.
-- `/broadcasts/trigger` — prevent accidental or malicious bulk-trigger that sends thousands of SMS.
+**Moved to version-2.md:** per-route tuning on remaining endpoints, IP allowlisting, bot detection.
 
 ---
 

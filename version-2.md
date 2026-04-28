@@ -80,3 +80,46 @@ Currently the "Send" flow in `BroadcastCompose` is a simulated progress bar (fak
 ## Dashboard — wire to real data
 
 `Dashboard` currently shows hardcoded KPI placeholders ("1 open delinquency", "2 rooms down"). Should be driven by real broadcast/conversation summary data once `GET /broadcasts` exists.
+
+---
+
+## Twilio Phone Number Per Manager (correctness issue + feature)
+
+A participant can belong to multiple managers' groups. If two managers fire a broadcast at the same time, both SMS come from the same Twilio number. When the participant replies, the webhook can't tell which manager's conversation the reply belongs to — it picks one arbitrarily.
+
+Per-manager phone numbers fixes the routing ambiguity: `From` + `To` together uniquely identify the conversation.
+
+Full plan deferred to v2.
+
+---
+
+## Rate Limiting — Per-route Tuning (moved from backend_implementation.md Step 25)
+
+v1 covers the global limit and the fire endpoint. The following are deferred:
+
+- Per-route tighter limits on remaining sensitive endpoints (e.g. `POST /users`, `PATCH /users/:id`)
+- IP allowlisting — restrict access to known office/VPN IPs if needed
+- Bot detection — e.g. block requests with no `User-Agent` or suspicious patterns
+
+---
+
+## Supabase RLS Policies (moved from backend_implementation.md Step 24)
+
+Write Row Level Security policies on all tenant-scoped tables in Supabase.
+
+**Why both RLS + route-layer RBAC:**
+Route layer is the first line of defense (fast, flexible). RLS is defense in depth — even if a bug in our code queries the wrong data, Postgres itself rejects the read. Two independent layers means a bug in one doesn't become a data breach.
+
+**Example RLS policy for `Conversation`:**
+```sql
+CREATE POLICY "managers_see_own_conversations" ON conversations
+  FOR SELECT USING (
+    broadcast_id IN (
+      SELECT b.id FROM broadcasts b
+      JOIN schedules s ON s.id = b.schedule_id
+      WHERE s.manager_id = auth.uid()
+    )
+  );
+```
+
+Tables that need policies: `users`, `groups`, `group_members`, `manager_groups`, `questions`, `schedules`, `schedule_questions`, `schedule_recipients`, `broadcasts`, `conversations`, `messages`, `answers`.
