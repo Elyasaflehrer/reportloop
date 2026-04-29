@@ -8,36 +8,23 @@ In `AdminUsersTab.tsx` the edit form role dropdown is missing the `participant` 
 
 ---
 
-## Task 2 — Scope Logic on All Data Endpoints
+## Task 2 — Unblock Participant Data Access
 
-Right now viewer and participant are blocked from all data endpoints (`requireRole('admin', 'manager')`). This task opens the read endpoints to these roles and applies the correct data filter per role.
+Participant can log in but gets 403 on every API call because all endpoints have `requireRole('admin', 'manager')`. Participant scope rule: **only their own conversations** (`WHERE userId = currentUser.id`).
 
-**Viewer scope:**
-```
-1. GroupMember WHERE userId = viewerId        → groupIds
-2. ManagerGroup WHERE groupId IN groupIds     → managerIds
-3. ManagerGroup WHERE managerId IN managerIds → allGroupIds (ALL groups of those managers)
-4. GroupMember WHERE groupId IN allGroupIds   → allUserIds
-5. filter data WHERE userId IN allUserIds
-```
-If viewer has no group memberships → fall back to own data only.
-Viewer can switch between managers — scope to selected manager at steps 2–5.
+Two files need to change:
 
-**Participant scope:**
-```
-filter data WHERE userId = currentUser.id
-```
-If participant has no group memberships → same, own data only.
+**Problem 1 — AppDataContext** fetches `/groups`, `/participants`, `/questions`, `/schedules` for every role on startup. All four require admin/manager → participant gets 403 before any screen loads. Fix: skip those fetches when role is `participant`.
+
+**Problem 2 — backend `broadcasts.ts`** has `requireRole('admin', 'manager')` on all three endpoints. Fix: add `'participant'` and filter by `userId = currentUser.id` for participant.
 
 ### Steps
 
-- [ ] `GET /broadcasts` — add `viewer` and `participant` to `requireRole`, apply scope filter
-- [ ] `GET /broadcasts/:id/conversations` — add `viewer` and `participant` to `requireRole`, apply scope filter
-- [ ] `GET /conversations/:id/messages` — add `viewer` and `participant` to `requireRole`, apply scope filter
-- [ ] `GET /conversations/:id/analysis` — add `viewer` and `participant` to `requireRole`, apply scope filter
-- [ ] `GET /schedules` — add `viewer` and `participant` to `requireRole`, apply scope filter
-- [ ] `GET /groups` — add `viewer` and `participant` to `requireRole`, apply scope filter
-- [ ] `GET /participants` — add `viewer` and `participant` to `requireRole`, apply scope filter
+- [x] `AppDataContext.tsx` — skip `/groups`, `/participants`, `/questions`, `/schedules` fetches when `role === 'participant'` (keep them for admin/manager/viewer)
+- [x] `GET /broadcasts` — add `participant` to `requireRole`; for participant add `where conversations: { some: { userId: req.user.id } }` (or scope schedule → broadcast → conversation to userId)
+- [x] `GET /broadcasts/:id/conversations` — add `participant` to `requireRole`; add `where userId: req.user.id` to the conversation query
+- [x] `GET /conversations/:id` — add `participant` to `requireRole`; verify the existing access check catches wrong userId (add `userId: req.user.id` to the findFirst where)
+- [x] Smoke test: participant logs in → sees only their broadcasts and conversations, no 403s
 
 ---
 

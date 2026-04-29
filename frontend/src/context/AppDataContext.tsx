@@ -26,7 +26,7 @@ export const useAppData = () => {
 export const AppDataProvider = ({ children }: { children: React.ReactNode }) => {
   const { session } = useSession()
   const token = session?.accessToken ?? null
-  const isAdmin = session?.role === 'admin'
+  const role  = session?.role ?? null
 
   const [users,         setUsers]         = useState<User[]>([])
   const [groups,        setGroups]        = useState<Group[]>([])
@@ -37,16 +37,19 @@ export const AppDataProvider = ({ children }: { children: React.ReactNode }) => 
   const [dataLoading,   setDataLoading]   = useState(false)
 
   const loadAll = useCallback(async () => {
-    if (!token) return
+    if (!token || !role) return
     setDataLoading(true)
     try {
+      // participant only needs their own conversations — skip endpoints they can't access
+      if (role === 'participant') { setDataLoading(false); return }
+
       const fetches: Promise<unknown>[] = [
         apiFetch('/groups?limit=500', token),
         apiFetch('/participants?limit=500', token),
         apiFetch('/questions?limit=500', token),
         apiFetch('/schedules?limit=500', token),
       ]
-      if (isAdmin) {
+      if (role === 'admin') {
         fetches.push(
           apiFetch('/users?limit=500', token),
           apiFetch('/manager-groups', token),
@@ -57,7 +60,7 @@ export const AppDataProvider = ({ children }: { children: React.ReactNode }) => 
       setParticipants(participantsRes?.data ?? [])
       setQuestions(questionsRes?.data   ?? [])
       setSchedules(schedulesRes?.data   ?? [])
-      if (isAdmin) {
+      if (role === 'admin') {
         setUsers(usersRes?.data         ?? [])
         setManagerGroups(mgRes?.data    ?? [])
       }
@@ -66,7 +69,7 @@ export const AppDataProvider = ({ children }: { children: React.ReactNode }) => 
     } finally {
       setDataLoading(false)
     }
-  }, [token, isAdmin])
+  }, [token, role])
 
   useEffect(() => { loadAll() }, [loadAll])
 

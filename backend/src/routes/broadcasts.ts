@@ -13,7 +13,7 @@ export async function broadcastsRoutes(app: FastifyInstance) {
 
   // ─── GET /broadcasts ───────────────────────────────────────────────────────
 
-  app.get('/broadcasts', { preHandler: [authenticate, requireRole('admin', 'manager')] }, async (req, reply) => {
+  app.get('/broadcasts', { preHandler: [authenticate, requireRole('admin', 'manager', 'participant')] }, async (req, reply) => {
     const query = listBroadcastsQuery.safeParse(req.query)
     if (!query.success) return reply.status(400).send({ error: query.error.flatten() })
 
@@ -26,6 +26,10 @@ export async function broadcastsRoutes(app: FastifyInstance) {
         ...(req.user.role === 'manager' && { managerId: req.user.id }),
       },
       ...(scheduleId && { scheduleId }),
+      // participant sees only broadcasts that have a conversation belonging to them
+      ...(req.user.role === 'participant' && {
+        conversations: { some: { userId: req.user.id } },
+      }),
     }
 
     const [broadcasts, total] = await Promise.all([
@@ -44,6 +48,8 @@ export async function broadcastsRoutes(app: FastifyInstance) {
             select: { label: true },
           },
           conversations: {
+            // participant: only count their own conversation
+            where: req.user.role === 'participant' ? { userId: req.user.id } : undefined,
             select: { status: true },
           },
         },
@@ -77,11 +83,11 @@ export async function broadcastsRoutes(app: FastifyInstance) {
 
   // ─── GET /broadcasts/:id/conversations ─────────────────────────────────────
 
-  app.get('/broadcasts/:id/conversations', { preHandler: [authenticate, requireRole('admin', 'manager')] }, async (req, reply) => {
+  app.get('/broadcasts/:id/conversations', { preHandler: [authenticate, requireRole('admin', 'manager', 'participant')] }, async (req, reply) => {
     const broadcastId = parseInt((req.params as { id: string }).id, 10)
     if (isNaN(broadcastId)) return reply.status(400).send({ error: 'Invalid broadcast id' })
 
-    // Verify access
+    // Verify access — participant must have a conversation in this broadcast
     const broadcast = await prisma.broadcast.findFirst({
       where: {
         id:       broadcastId,
@@ -89,12 +95,19 @@ export async function broadcastsRoutes(app: FastifyInstance) {
           deletedAt: null,
           ...(req.user.role === 'manager' && { managerId: req.user.id }),
         },
+        ...(req.user.role === 'participant' && {
+          conversations: { some: { userId: req.user.id } },
+        }),
       },
     })
     if (!broadcast) return reply.status(404).send({ error: 'Broadcast not found' })
 
     const conversations = await prisma.conversation.findMany({
-      where:   { broadcastId },
+      where: {
+        broadcastId,
+        // participant only sees their own conversation row
+        ...(req.user.role === 'participant' && { userId: req.user.id }),
+      },
       orderBy: { startedAt: 'asc' },
       select: {
         id:            true,
@@ -126,13 +139,15 @@ export async function broadcastsRoutes(app: FastifyInstance) {
 
   // ─── GET /conversations/:id ────────────────────────────────────────────────
 
-  app.get('/conversations/:id', { preHandler: [authenticate, requireRole('admin', 'manager')] }, async (req, reply) => {
+  app.get('/conversations/:id', { preHandler: [authenticate, requireRole('admin', 'manager', 'participant')] }, async (req, reply) => {
     const conversationId = parseInt((req.params as { id: string }).id, 10)
     if (isNaN(conversationId)) return reply.status(400).send({ error: 'Invalid conversation id' })
 
     const conversation = await prisma.conversation.findFirst({
       where: {
         id: conversationId,
+        // participant can only open their own conversation
+        ...(req.user.role === 'participant' && { userId: req.user.id }),
         broadcast: {
           schedule: {
             deletedAt: null,
