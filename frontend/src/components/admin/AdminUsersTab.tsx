@@ -270,6 +270,7 @@ export const AdminUsersTab = () => {
                 <option value="admin">admin</option>
                 <option value="manager">manager</option>
                 <option value="viewer">viewer</option>
+                <option value="participant">participant</option>
               </select>
             </div>
             <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 8 }}>
