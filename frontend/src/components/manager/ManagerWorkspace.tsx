@@ -1,5 +1,4 @@
 import { useState } from 'react'
-import { useSession } from '../../context/SessionContext'
 import { Tab } from '../ui/Tab'
 import { ManagerQuestionsPanel } from './ManagerQuestionsPanel'
 import { ManagerSchedulePanel } from './ManagerSchedulePanel'
@@ -7,8 +6,6 @@ import { ManagerParticipantsPanel } from './ManagerParticipantsPanel'
 import { History } from '../history/History'
 
 export const ManagerWorkspace = () => {
-  const { session } = useSession()
-  const mid = session!.id
   const [tab, setTab] = useState('questions')
 
   return (
@@ -32,7 +29,6 @@ export const ManagerWorkspace = () => {
       {tab === 'participants'&& <ManagerParticipantsPanel />}
       {tab === 'corr' && (
         <History
-          managerFilterId={mid}
           title="Correspondences"
           subtitle="Threads for properties under your manager partition only."
           emptyMessage="No broadcasts yet. Use Send now or wait for a scheduled broadcast."

@@ -76,9 +76,10 @@ export const History = ({ title, subtitle, emptyMessage, participantEmployeeId, 
 
   const loadBroadcasts = useCallback(async () => {
     if (!token) return
-    // null/undefined/NaN means viewer with no manager resolved yet — wait
-    if (managerFilterId == null || Number.isNaN(Number(managerFilterId))) { setBroadcasts([]); setLoading(false); return }
-    const url = managerFilterId != null
+    // null means viewer/participant waiting for manager selection — don't fetch yet
+    // undefined means no filter needed (manager role) — fetch without managerId
+    if (managerFilterId === null) { setBroadcasts([]); setLoading(false); return }
+    const url = managerFilterId !== undefined
       ? `/broadcasts?limit=50&managerId=${managerFilterId}`
       : '/broadcasts?limit=50'
     setLoading(true)
