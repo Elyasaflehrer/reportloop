@@ -21,6 +21,42 @@ export async function authRoutes(app: FastifyInstance) {
       scope = { managedGroupIds: groups.map(g => g.groupId) }
     }
 
+    if (role === 'participant') {
+      // Same two-source merge as viewer, but no role filter on the manager —
+      // participant sees their section header regardless of manager's current role.
+      const [currentLinks, historicalLinks] = await Promise.all([
+        prisma.$queryRaw<{ manager_id: number; name: string }[]>`
+          SELECT DISTINCT mg.manager_id, u.name
+          FROM group_members gm
+          JOIN manager_groups mg ON mg.group_id = gm.group_id
+          JOIN users u ON u.id = mg.manager_id
+          WHERE gm.user_id = ${id}
+        `,
+        prisma.$queryRaw<{ manager_id: number; name: string }[]>`
+          SELECT DISTINCT s.manager_id, u.name
+          FROM conversations c
+          JOIN broadcasts b ON b.id = c.broadcast_id
+          JOIN schedules s ON s.id = b.schedule_id
+          JOIN users u ON u.id = s.manager_id
+          WHERE c.user_id = ${id}
+        `,
+      ])
+
+      const map = new Map<number, { id: number; name: string; access: 'full' | 'own' }>()
+      for (const r of historicalLinks) {
+        map.set(r.manager_id, { id: r.manager_id, name: r.name, access: 'own' })
+      }
+      for (const r of currentLinks) {
+        map.set(r.manager_id, { id: r.manager_id, name: r.name, access: 'full' })
+      }
+      const viewableManagers = [...map.values()]
+
+      scope = {
+        viewableManagers,
+        viewableManagerIds: viewableManagers.map(m => m.id),
+      }
+    }
+
     if (role === 'viewer') {
       // Two sources in parallel:
       // 1. Current group membership → full access (sees all conversations)
