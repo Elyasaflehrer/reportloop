@@ -1,5 +1,27 @@
 # Version 2 — Planned Features
 
+## Stale Session — Manager List Out of Sync
+
+If an admin reassigns a viewer's groups while the viewer is logged in, their manager list in the dropdown becomes stale until they re-login. Need to make a plan for detecting and handling this — options include periodic refresh of `/auth/me`, a manual "refresh" button, or a session TTL that forces re-login. No implementation yet, plan needed first.
+
+---
+
+## Manager Switcher — Loading State on Switch
+
+When the viewer switches managers, the conversation list re-fetches but currently shows no loading indicator. Add a visible loading state (spinner or skeleton rows) so the viewer knows the data is updating and doesn't think the screen is broken.
+
+---
+
+## Correspondences Tab — UI/UX Redesign
+
+The current Correspondences tab (manager + participant) is not well organized. The information hierarchy needs to be rethought so users can easily navigate their broadcast history and conversations. Design work required before implementation.
+
+**Key data point:** schedules have a label/description — conversations should be grouped by that description (e.g. all "Weekly send" conversations together, all "Monthly review" conversations together).
+
+**Filtering:** users should be able to filter the view by question, by participant, by date/date range, and potentially by conversation status.
+
+---
+
 ## Google OAuth (Sign in with Google)
 
 The login screen currently uses email + password only (Supabase `signInWithPassword`).
