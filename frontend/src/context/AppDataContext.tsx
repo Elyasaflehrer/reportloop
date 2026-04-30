@@ -43,15 +43,16 @@ export const AppDataProvider = ({ children }: { children: React.ReactNode }) => 
       // participant and viewer only need broadcast data — skip endpoints they can't access
       if (role === 'participant' || role === 'viewer') { setDataLoading(false); return }
 
+      const limit = import.meta.env.VITE_PAGE_LIMIT ?? '500'
       const fetches: Promise<unknown>[] = [
-        apiFetch('/groups?limit=500', token),
-        apiFetch('/participants?limit=500', token),
-        apiFetch('/questions?limit=500', token),
-        apiFetch('/schedules?limit=500', token),
+        apiFetch(`/groups?limit=${limit}`, token),
+        apiFetch(`/participants?limit=${limit}`, token),
+        apiFetch(`/questions?limit=${limit}`, token),
+        apiFetch(`/schedules?limit=${limit}`, token),
       ]
       if (role === 'admin') {
         fetches.push(
-          apiFetch('/users?limit=500', token),
+          apiFetch(`/users?limit=${limit}`, token),
           apiFetch('/manager-groups', token),
         )
       }
