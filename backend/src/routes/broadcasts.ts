@@ -55,8 +55,10 @@ export async function broadcastsRoutes(app: FastifyInstance) {
     const where = {
       schedule: {
         deletedAt: null,
-        ...(req.user.role === 'manager' && { managerId: req.user.id }),
-        ...(req.user.role === 'viewer'  && { managerId }),
+        ...(req.user.role === 'manager'     && { managerId: req.user.id }),
+        ...(req.user.role === 'viewer'      && { managerId }),
+        // participant can scope to one manager's broadcasts for grouped display
+        ...(req.user.role === 'participant' && managerId && { managerId }),
       },
       ...(scheduleId && { scheduleId }),
       // participant or viewer with own-only access: only broadcasts where this user has a conversation
@@ -78,7 +80,7 @@ export async function broadcastsRoutes(app: FastifyInstance) {
           status:      true,
           triggeredAt: true,
           schedule: {
-            select: { label: true },
+            select: { label: true, managerId: true },
           },
           conversations: {
             // participant or viewer with own-only access: only count their own conversation
@@ -99,6 +101,7 @@ export async function broadcastsRoutes(app: FastifyInstance) {
           id:            b.id,
           scheduleId:    b.scheduleId,
           scheduleLabel: b.schedule.label ?? null,
+          managerId:     b.schedule.managerId,
           fireDate:      b.fireDate,
           status:        b.status,
           triggeredAt:   b.triggeredAt,
