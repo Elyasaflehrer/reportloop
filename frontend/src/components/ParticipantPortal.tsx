@@ -6,6 +6,8 @@ export const ParticipantPortal = () => {
 
   if (!session) return null
 
+  const managers = session.viewableManagers ?? []
+
   return (
     <div style={{ minHeight: '100vh', background: 'var(--bg)', display: 'flex', flexDirection: 'column' }}>
       <header style={{ padding: '14px 20px', borderBottom: '1px solid var(--border)', background: 'var(--surface)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16 }}>
@@ -21,12 +23,26 @@ export const ParticipantPortal = () => {
           Log out
         </button>
       </header>
-      <main style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
-        <History
-          title="Correspondences"
-          subtitle="Open a broadcast, then View Log for AI Analysis and Full Transcript. Nothing appears here until your first report has started."
-          emptyMessage="No check-ins yet. Your reports will appear here after the first one has started."
-        />
+
+      <main style={{ flex: 1, overflow: 'auto', display: 'flex', flexDirection: 'column' }}>
+        {managers.length === 0 ? (
+          <History
+            title="Correspondences"
+            subtitle="Open a broadcast, then View Log for AI Analysis and Full Transcript."
+            emptyMessage="No check-ins yet. Your reports will appear here after the first one has started."
+          />
+        ) : (
+          managers.map(m => (
+            <div key={m.id} style={{ borderBottom: '2px solid var(--border)' }}>
+              <History
+                managerFilterId={m.id}
+                title={m.name}
+                subtitle="Your conversations with this manager."
+                emptyMessage="No check-ins yet from this manager."
+              />
+            </div>
+          ))
+        )}
       </main>
     </div>
   )
