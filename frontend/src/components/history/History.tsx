@@ -46,6 +46,7 @@ type Props = {
   managerFilterId?: string | number | null
   title?: string
   subtitle?: string
+  emptyMessage?: string
   participantEmployeeId?: number | null
 }
 
@@ -62,11 +63,12 @@ const fmtDate = (iso: string) => {
   return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
 }
 
-export const History = ({ title, subtitle, participantEmployeeId }: Props) => {
+export const History = ({ title, subtitle, emptyMessage, participantEmployeeId, managerFilterId }: Props) => {
   const { token } = useAppData()
 
   const [broadcasts,  setBroadcasts]  = useState<Broadcast[]>([])
   const [loading,     setLoading]     = useState(true)
+  const [error,       setError]       = useState(false)
   const [expanded,    setExpanded]    = useState<number | null>(null)
   const [convRows,    setConvRows]    = useState<Record<number, ConversationRow[]>>({})
   const [convLoading, setConvLoading] = useState<number | null>(null)
@@ -74,16 +76,23 @@ export const History = ({ title, subtitle, participantEmployeeId }: Props) => {
 
   const loadBroadcasts = useCallback(async () => {
     if (!token) return
+    // null/undefined/NaN means viewer with no manager resolved yet — wait
+    if (managerFilterId == null || Number.isNaN(Number(managerFilterId))) { setBroadcasts([]); setLoading(false); return }
+    const url = managerFilterId != null
+      ? `/broadcasts?limit=50&managerId=${managerFilterId}`
+      : '/broadcasts?limit=50'
     setLoading(true)
+    setError(false)
     try {
-      const res = await apiFetch('/broadcasts?limit=50', token) as any
+      const res = await apiFetch(url, token) as any
       setBroadcasts(res?.data ?? [])
     } catch {
       setBroadcasts([])
+      setError(true)
     } finally {
       setLoading(false)
     }
-  }, [token])
+  }, [token, managerFilterId])
 
   useEffect(() => { loadBroadcasts() }, [loadBroadcasts])
 
@@ -126,15 +135,19 @@ export const History = ({ title, subtitle, participantEmployeeId }: Props) => {
         <div style={{ color: 'var(--text-3)', fontSize: 14 }}>Loading…</div>
       )}
 
-      {!loading && broadcasts.length === 0 && (
-        <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--radius)', padding: '22px 24px', color: 'var(--text-2)', fontSize: 14, boxShadow: 'var(--shadow)' }}>
-          {participantEmployeeId != null
-            ? 'No correspondences yet. Your weekly reports will appear here after the first one has started.'
-            : 'No broadcasts yet. Trigger a report cycle via Send now or a scheduled broadcast.'}
+      {!loading && error && (
+        <div style={{ background: 'var(--surface)', border: '1px solid var(--red)', borderRadius: 'var(--radius)', padding: '22px 24px', color: 'var(--red)', fontSize: 14, boxShadow: 'var(--shadow)' }}>
+          Failed to load data. Please contact support.
         </div>
       )}
 
-      {!loading && broadcasts.length > 0 && (
+      {!loading && !error && broadcasts.length === 0 && (
+        <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--radius)', padding: '22px 24px', color: 'var(--text-2)', fontSize: 14, boxShadow: 'var(--shadow)' }}>
+          {emptyMessage ?? 'No broadcasts yet. Trigger a report cycle via Send now or a scheduled broadcast.'}
+        </div>
+      )}
+
+      {!loading && !error && broadcasts.length > 0 && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
           {broadcasts.map(b => {
             const isOpen = expanded === b.id

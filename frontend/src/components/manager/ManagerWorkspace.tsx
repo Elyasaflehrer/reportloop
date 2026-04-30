@@ -35,6 +35,7 @@ export const ManagerWorkspace = () => {
           managerFilterId={mid}
           title="Correspondences"
           subtitle="Threads for properties under your manager partition only."
+          emptyMessage="No broadcasts yet. Use Send now or wait for a scheduled broadcast."
         />
       )}
     </div>

@@ -25,6 +25,7 @@ export const ParticipantPortal = () => {
         <History
           title="Correspondences"
           subtitle="Open a broadcast, then View Log for AI Analysis and Full Transcript. Nothing appears here until your first report has started."
+          emptyMessage="No check-ins yet. Your reports will appear here after the first one has started."
         />
       </main>
     </div>

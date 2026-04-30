@@ -137,9 +137,16 @@ const AppShell = () => {
         <main style={{ flex: 1, display: 'flex', overflow: 'auto', background: 'var(--bg)', paddingTop: isMobile ? 44 : 0 }}>
           {session.role === 'admin'   && page === 'admin'      && <AdminDashboard onNav={navigate} />}
           {session.role === 'manager' && page === 'manager'    && <ManagerWorkspace />}
-          {page === 'history' && (
+          {page === 'history' && session.role === 'viewer' && (session.viewableManagers ?? []).length === 0 && (
+            <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 40 }}>
+              <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--radius)', padding: '22px 24px', color: 'var(--text-2)', fontSize: 14, boxShadow: 'var(--shadow)', maxWidth: 440, textAlign: 'center' }}>
+                You have no managers assigned. Contact your admin.
+              </div>
+            </div>
+          )}
+          {page === 'history' && !(session.role === 'viewer' && (session.viewableManagers ?? []).length === 0) && (
             <History
-              managerFilterId={session.role === 'viewer' ? viewerMid : session.role === 'manager' ? session.id : null}
+              managerFilterId={session.role === 'viewer' ? viewerMid : undefined}
               title="Correspondences"
               subtitle={
                 session.role === 'viewer'
@@ -147,6 +154,13 @@ const AppShell = () => {
                   : session.role === 'manager'
                     ? 'Your partition only.'
                     : undefined
+              }
+              emptyMessage={
+                session.role === 'viewer'
+                  ? 'No broadcasts yet for this manager.'
+                  : session.role === 'manager'
+                    ? 'No broadcasts yet. Use Send now or wait for a scheduled broadcast.'
+                    : 'No broadcasts yet. Trigger a report cycle via Send now or a scheduled broadcast.'
               }
             />
           )}
