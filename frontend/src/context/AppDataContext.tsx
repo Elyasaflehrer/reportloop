@@ -40,8 +40,8 @@ export const AppDataProvider = ({ children }: { children: React.ReactNode }) => 
     if (!token || !role) return
     setDataLoading(true)
     try {
-      // participant only needs their own conversations — skip endpoints they can't access
-      if (role === 'participant') { setDataLoading(false); return }
+      // participant and viewer only need broadcast data — skip endpoints they can't access
+      if (role === 'participant' || role === 'viewer') { setDataLoading(false); return }
 
       const fetches: Promise<unknown>[] = [
         apiFetch('/groups?limit=500', token),

@@ -34,6 +34,7 @@ const mapSupabaseSession = (sb: { user: { id: string; email?: string; user_metad
   initials: ((sb.user.user_metadata?.name || sb.user.email || '??').slice(0, 2)).toUpperCase(),
   role: (sb.user.user_metadata?.role || 'viewer') as UserRole,
   title: sb.user.user_metadata?.title || '',
+  viewableManagers: [],
   viewerManagerIds: [],
   activeManagerId: null,
   accessToken: sb.access_token,
@@ -59,6 +60,7 @@ export const SessionProvider = ({ children }: { children: React.ReactNode }) => 
           ...base,
           role:             user.role,
           name:             user.name || base.name,
+          viewableManagers: scope?.viewableManagers ?? [],
           viewerManagerIds: scope?.viewableManagerIds ?? [],
           activeManagerId:  (scope?.viewableManagerIds ?? [])[0] ?? null,
         })

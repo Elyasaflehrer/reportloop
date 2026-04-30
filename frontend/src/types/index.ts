@@ -7,6 +7,7 @@ export interface Session {
   initials: string;
   role: UserRole;
   title: string;
+  viewableManagers: { id: number; name: string; access: 'full' | 'own' }[];
   viewerManagerIds: number[];
   activeManagerId: number | null;
   accessToken: string;
