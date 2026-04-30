@@ -22,7 +22,7 @@ const schema = z.object({
   }),
 
   redis: z.object({
-    url: z.string().min(1),
+    url: z.string().optional(),
   }),
 
   // Optional — app starts without it, SMS features disabled until set.

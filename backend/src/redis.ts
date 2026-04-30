@@ -1,7 +1,9 @@
 import Redis from 'ioredis'
+import RedisMock from 'ioredis-mock'
 import { config } from './config.js'
 
-export const redis = new Redis(config.redis.url, {
-  maxRetriesPerRequest: null, // required by BullMQ
-  lazyConnect: true,
-})
+const useMock = !config.redis.url || config.redis.url === 'mock'
+
+export const redis = useMock
+  ? new RedisMock()
+  : new Redis(config.redis.url!, { maxRetriesPerRequest: null, lazyConnect: true })
