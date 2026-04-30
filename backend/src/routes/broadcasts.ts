@@ -7,27 +7,60 @@ const listBroadcastsQuery = z.object({
   page:       z.coerce.number().int().min(1).default(1),
   limit:      z.coerce.number().int().min(1).max(200).default(30),
   scheduleId: z.coerce.number().int().positive().optional(),
+  managerId:  z.coerce.number().int().positive().optional(),
 })
+
+type ViewerAccess = 'full' | 'own' | 'none'
+
+// full  → viewer is currently in a group attached to this manager (sees all conversations)
+// own   → viewer has past conversations from this manager but was removed from the group
+// none  → no connection at all
+async function viewerAccessLevel(viewerId: number, managerId: number): Promise<ViewerAccess> {
+  // Current group membership AND manager still has active manager role → full access
+  const link = await prisma.groupMember.findFirst({
+    where: {
+      userId: viewerId,
+      group: { managerLinks: { some: { managerId, manager: { role: 'manager' } } } },
+    },
+    select: { userId: true },
+  })
+  if (link) return 'full'
+
+  // Historical participant conversations → own-only access
+  const conv = await prisma.conversation.findFirst({
+    where: { userId: viewerId, broadcast: { schedule: { managerId } } },
+    select: { id: true },
+  })
+  return conv ? 'own' : 'none'
+}
 
 export async function broadcastsRoutes(app: FastifyInstance) {
 
   // ─── GET /broadcasts ───────────────────────────────────────────────────────
 
-  app.get('/broadcasts', { preHandler: [authenticate, requireRole('admin', 'manager', 'participant')] }, async (req, reply) => {
+  app.get('/broadcasts', { preHandler: [authenticate, requireRole('admin', 'manager', 'participant', 'viewer')] }, async (req, reply) => {
     const query = listBroadcastsQuery.safeParse(req.query)
     if (!query.success) return reply.status(400).send({ error: query.error.flatten() })
 
-    const { page, limit, scheduleId } = query.data
+    const { page, limit, scheduleId, managerId } = query.data
     const skip = (page - 1) * limit
+
+    let viewerAccess: ViewerAccess | null = null
+    if (req.user.role === 'viewer') {
+      if (!managerId) return reply.status(400).send({ error: 'managerId query param is required for viewer' })
+      viewerAccess = await viewerAccessLevel(req.user.id, managerId)
+      if (viewerAccess === 'none') return reply.status(403).send({ error: 'Forbidden' })
+    }
 
     const where = {
       schedule: {
         deletedAt: null,
         ...(req.user.role === 'manager' && { managerId: req.user.id }),
+        ...(req.user.role === 'viewer'  && { managerId }),
       },
       ...(scheduleId && { scheduleId }),
-      // participant sees only broadcasts that have a conversation belonging to them
-      ...(req.user.role === 'participant' && {
+      // participant or viewer with own-only access: only broadcasts where this user has a conversation
+      ...((req.user.role === 'participant' || (req.user.role === 'viewer' && viewerAccess === 'own')) && {
         conversations: { some: { userId: req.user.id } },
       }),
     }
@@ -48,8 +81,10 @@ export async function broadcastsRoutes(app: FastifyInstance) {
             select: { label: true },
           },
           conversations: {
-            // participant: only count their own conversation
-            where: req.user.role === 'participant' ? { userId: req.user.id } : undefined,
+            // participant or viewer with own-only access: only count their own conversation
+            where: (req.user.role === 'participant' || (req.user.role === 'viewer' && viewerAccess === 'own'))
+              ? { userId: req.user.id }
+              : undefined,
             select: { status: true },
           },
         },
@@ -83,11 +118,11 @@ export async function broadcastsRoutes(app: FastifyInstance) {
 
   // ─── GET /broadcasts/:id/conversations ─────────────────────────────────────
 
-  app.get('/broadcasts/:id/conversations', { preHandler: [authenticate, requireRole('admin', 'manager', 'participant')] }, async (req, reply) => {
+  app.get('/broadcasts/:id/conversations', { preHandler: [authenticate, requireRole('admin', 'manager', 'participant', 'viewer')] }, async (req, reply) => {
     const broadcastId = parseInt((req.params as { id: string }).id, 10)
     if (isNaN(broadcastId)) return reply.status(400).send({ error: 'Invalid broadcast id' })
 
-    // Verify access — participant must have a conversation in this broadcast
+    // Verify access
     const broadcast = await prisma.broadcast.findFirst({
       where: {
         id:       broadcastId,
@@ -99,14 +134,23 @@ export async function broadcastsRoutes(app: FastifyInstance) {
           conversations: { some: { userId: req.user.id } },
         }),
       },
+      select: { id: true, schedule: { select: { managerId: true } } },
     })
     if (!broadcast) return reply.status(404).send({ error: 'Broadcast not found' })
+
+    let convViewerAccess: ViewerAccess | null = null
+    if (req.user.role === 'viewer') {
+      convViewerAccess = await viewerAccessLevel(req.user.id, broadcast.schedule.managerId)
+      if (convViewerAccess === 'none') return reply.status(403).send({ error: 'Forbidden' })
+    }
 
     const conversations = await prisma.conversation.findMany({
       where: {
         broadcastId,
-        // participant only sees their own conversation row
-        ...(req.user.role === 'participant' && { userId: req.user.id }),
+        // participant or viewer with own-only access: only their own conversation
+        ...((req.user.role === 'participant' || (req.user.role === 'viewer' && convViewerAccess === 'own')) && {
+          userId: req.user.id,
+        }),
       },
       orderBy: { startedAt: 'asc' },
       select: {
@@ -139,7 +183,7 @@ export async function broadcastsRoutes(app: FastifyInstance) {
 
   // ─── GET /conversations/:id ────────────────────────────────────────────────
 
-  app.get('/conversations/:id', { preHandler: [authenticate, requireRole('admin', 'manager', 'participant')] }, async (req, reply) => {
+  app.get('/conversations/:id', { preHandler: [authenticate, requireRole('admin', 'manager', 'participant', 'viewer')] }, async (req, reply) => {
     const conversationId = parseInt((req.params as { id: string }).id, 10)
     if (isNaN(conversationId)) return reply.status(400).send({ error: 'Invalid conversation id' })
 
@@ -176,10 +220,21 @@ export async function broadcastsRoutes(app: FastifyInstance) {
             question: { select: { id: true, text: true } },
           },
         },
+        broadcast: {
+          select: { schedule: { select: { managerId: true } } },
+        },
       },
     })
 
     if (!conversation) return reply.status(404).send({ error: 'Conversation not found' })
+
+    if (req.user.role === 'viewer') {
+      const access = await viewerAccessLevel(req.user.id, conversation.broadcast.schedule.managerId)
+      if (access === 'none') return reply.status(403).send({ error: 'Forbidden' })
+      if (access === 'own' && conversation.user.id !== req.user.id) {
+        return reply.status(403).send({ error: 'Forbidden' })
+      }
+    }
 
     return reply.send({
       id:          conversation.id,
