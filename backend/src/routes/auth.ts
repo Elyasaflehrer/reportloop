@@ -22,14 +22,44 @@ export async function authRoutes(app: FastifyInstance) {
     }
 
     if (role === 'viewer') {
-      // Viewer sees conversations for all managers in groups the viewer belongs to
-      const managerLinks = await prisma.$queryRaw<{ manager_id: number }[]>`
-        SELECT DISTINCT mg.manager_id
-        FROM group_members gm
-        JOIN manager_groups mg ON mg.group_id = gm.group_id
-        WHERE gm.user_id = ${id}
-      `
-      scope = { viewableManagerIds: managerLinks.map(r => r.manager_id) }
+      // Two sources in parallel:
+      // 1. Current group membership → full access (sees all conversations)
+      // 2. Historical participant conversations → own-only access
+      // Note: former managers (role changed to viewer) are treated as regular viewers —
+      //       they see only their own participant conversations, not all historical data.
+      const [currentLinks, historicalLinks] = await Promise.all([
+        prisma.$queryRaw<{ manager_id: number; name: string }[]>`
+          SELECT DISTINCT mg.manager_id, u.name
+          FROM group_members gm
+          JOIN manager_groups mg ON mg.group_id = gm.group_id
+          JOIN users u ON u.id = mg.manager_id
+          WHERE gm.user_id = ${id}
+          AND u.role = 'manager'
+        `,
+        prisma.$queryRaw<{ manager_id: number; name: string }[]>`
+          SELECT DISTINCT s.manager_id, u.name
+          FROM conversations c
+          JOIN broadcasts b ON b.id = c.broadcast_id
+          JOIN schedules s ON s.id = b.schedule_id
+          JOIN users u ON u.id = s.manager_id
+          WHERE c.user_id = ${id}
+        `,
+      ])
+
+      // Merge: 'full' wins over 'own' when a manager appears in both sources
+      const map = new Map<number, { id: number; name: string; access: 'full' | 'own' }>()
+      for (const r of historicalLinks) {
+        map.set(r.manager_id, { id: r.manager_id, name: r.name, access: 'own' })
+      }
+      for (const r of currentLinks) {
+        map.set(r.manager_id, { id: r.manager_id, name: r.name, access: 'full' })
+      }
+      const viewableManagers = [...map.values()]
+
+      scope = {
+        viewableManagers,
+        viewableManagerIds: viewableManagers.map(m => m.id),
+      }
     }
 
     return reply.send({ user: req.user, scope })
