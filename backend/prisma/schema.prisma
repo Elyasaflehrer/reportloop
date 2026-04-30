@@ -3,9 +3,7 @@ generator client {
 }
 
 datasource db {
-  provider  = "postgresql"
-  url       = env("DATABASE_URL")
-  directUrl = env("DATABASE_URL_DIRECT")
+  provider = "postgresql"
 }
 
 // ─── ENUMS ───────────────────────────────────────────────────────────────────
@@ -121,6 +119,7 @@ model ManagerGroup {
 
   @@id([managerId, groupId])
   @@index([managerId])
+  @@index([groupId])
   @@map("manager_groups")
 }
 
@@ -136,6 +135,7 @@ model Question {
   scheduleQuestions ScheduleQuestion[]
   answers           Answer[]
 
+  @@index([managerId])
   @@map("questions")
 }
 
@@ -157,6 +157,7 @@ model Schedule {
   scheduleQuestions  ScheduleQuestion[]
   broadcasts         Broadcast[]
 
+  @@index([managerId])
   @@map("schedules")
 }
 
@@ -168,6 +169,7 @@ model ScheduleRecipient {
   user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@id([scheduleId, userId])
+  @@index([userId])
   @@map("schedule_recipients")
 }
 
@@ -216,6 +218,7 @@ model Conversation {
   messages  Message[]
   answers   Answer[]
 
+  @@index([broadcastId])
   @@index([userId, status])
   @@index([status])
   @@index([lastMessageAt])
@@ -232,6 +235,7 @@ model Message {
 
   conversation Conversation @relation(fields: [conversationId], references: [id])
 
+  @@index([conversationId])
   @@map("messages")
 }
 
