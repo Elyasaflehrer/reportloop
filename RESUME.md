@@ -1,112 +1,73 @@
-# Where We Left Off
+# Resume — Last Session
 
-## Current Status
+## What we did
 
-**Phase 0 — Frontend Cleanup: ✅ Complete**  
-**Phase 1 — Foundation: ✅ Complete**  
-**Phase 2 — CRUD APIs: ✅ Complete**  
-**Phase 3 — Broadcast Engine: ✅ Complete**  
-**Phase 4 — Webhooks & Conversations: ✅ Complete**  
-**Phase 5 — Frontend Cutover: ✅ Complete (1 uncommitted change pending)**  
-**Phase 6 — Production Hardening: 🔲 Not started**
+Full brainstorming and strategy finalization for **Version 1.2 — Per-Manager Twilio Phone Numbers**.
 
 ---
 
-## Uncommitted Changes (commit before switching tasks)
+## Strategy Decision
 
-`AI_Reporter.html` has staged changes that were NOT committed yet. Run:
+Chose **Option A — Per-Manager Number + Lazy Reuse**.
 
-```bash
-git add AI_Reporter.html
-git commit -m "Wire ManagerQuestionsPanel and ManagerSchedulePanel to real API; fix participant visibility"
-```
+Each manager gets their own dedicated Twilio number, provisioned at creation time.
+Numbers are never proactively released — they stay on the user record and get recycled.
+No global fallback number (`TWILIO_FROM_NUMBER` removed entirely).
 
-What these changes include:
-- **ManagerQuestionsPanel** — replaced localStorage stubs with POST/PATCH/DELETE `/questions`
-- **ManagerSchedulePanel** — replaced localStorage stubs with full schedule CRUD API calls; added timezone selector
-- **ManagerParticipantsPanel** — NEW component; added "Participants" tab to manager workspace showing group-scoped participants
-- **BroadcastCompose** — "Questions the AI will ask" preview now uses real questions from AppData
-- **AdminUsersTab** — added "participant" role option to Add User form (phone required, no invite email)
-- **AdminGroupsTab** — removed participants-exclusion filter from group member picker so admins can add participants to groups directly
+Full strategy documented in: `backend/docs/per-manager-phone-numbers.md`
 
 ---
 
-## How to Start the Server
+## Key Decisions Made
 
-```bash
-# Start Redis
-docker start reportloop-redis
-# (if removed: docker run -d --name reportloop-redis -p 6379:6379 redis:7-alpine)
+### Provisioning
+- **C1 (eager):** number provisioned at manager creation time
+- **3-step order:** own number → idle number from another user → new Twilio purchase
+- **Role-churn safe:** same user re-promoted always reclaims their own number first
+- **Soft-delete safe:** number stays on soft-deleted record, recycled by Step 2
 
-# Start backend
-cd /home/elyasaf/workstation/reportloop/backend
-npm run dev
+### Cost Controls
+- `TWILIO_MAX_NUMBERS` env var (default 50) — caps total Twilio purchases
+- `TWILIO_NUMBER_COUNTRY` env var (default `US`)
+- `TWILIO_NUMBER_TYPE` env var (default `local`)
+- Webhook URL built from existing `API_BASE_URL`: `{API_BASE_URL}/webhooks/sms`
 
-# Serve frontend (in another terminal)
-cd /home/elyasaf/workstation/reportloop
-npx serve . -p 8080
-```
+### Broadcast Guard
+- Manager without `twilioNumber` is **blocked** — no exceptions, no fallback
+- Frontend: "Send now" and "Schedule" buttons disabled with message: *"No phone number assigned to your account. Contact your admin."*
+- Backend: broadcast service rejects the request
 
----
+### Inbound Routing
+- Routes by `To` (manager's number) + `From` (participant's phone)
+- `500` for transient server errors — Twilio retries
+- `200` + log for permanent failures (no manager found, participant not found)
+- `WEBHOOK_RETRY_ATTEMPTS` env var (default 2) — internal retries before returning 500
 
-## Key Auth Facts
+### No Global Number
+- `TWILIO_FROM_NUMBER` removed from config entirely
+- Every SMS must come from the manager's own `twilioNumber`
 
-- JWT is **ES256** (asymmetric). `jwt.verify(token, secret)` does NOT work — always use `supabaseAdmin.auth.getUser(token)`.
-- On first login, `supabase_id` is auto-linked to the DB user row by email lookup.
-- `GET /auth/me` is called by the frontend on every login to get the real DB role (overrides stale JWT metadata).
-- Admin role changes call `supabaseAdmin.auth.admin.updateUserById` to sync JWT metadata immediately.
+### Existing Managers
+- Not migrated — blocked from broadcasting until a number is manually assigned via DB
+- Acceptable for initial rollout
 
----
-
-## Admin Setup Flow (for testing)
-
-1. Admin → **Users & Roles** tab → Add participant (role: participant, phone required)
-2. Admin → **Users & Roles** tab → Find participant row → click "Groups…" → assign to a group
-   — OR —
-   Admin → **Groups** tab → Edit group → member picker now includes participants → add participant
-3. Admin → **Manager Groups** tab → select manager → click "Assign groups…" → pick the group
-4. Manager logs in → **Participants** tab → sees the participant
-5. Manager → **Schedule** tab → Add schedule → Subset mode → participant appears in recipient picker
-
----
-
-## Current Git State
-
-Branch: `dev/claude`  
-Last commit: `0f4080b` — Fix session role: call GET /auth/me on login to get role from DB
-
-Recent commits (Phase 5 work):
-- `0f4080b` — Fix session role: call GET /auth/me on login to get role from DB
-- `dfcbc76` — Fix invite flow: link supabase_id at creation and sync role changes to Supabase
-- `a7172e3` — Fix auth: auto-link supabase_id on first login and remove stale debug log
-- `dc7f198` — Add local development guide and version-2 backlog
-- `5f6c95d` — Phase 5: wire AdminUsersTab, AdminGroupsTab, AdminManagerGroupsTab to real API
-- `fc6566d` — Raise pagination limit cap from 100 to 500 on all list endpoints
-- `4822a77` — Fix JWT auth: replace jwt.verify with supabaseAdmin.auth.getUser
+### DB Fields Added
+- `twilioNumber` — E.164 phone number string, unique
+- `twilioNumberSid` — Twilio resource SID, stored for future cleanup/release
 
 ---
 
-## Phase 6 — Production Hardening (Next)
+## Files Created / Updated
 
-- [ ] Rate limiting on auth and SMS endpoints
-- [ ] Error monitoring (Sentry or similar)
-- [ ] Database connection pooling tuning
-- [ ] Environment variable validation on startup
-- [ ] CORS configuration for production domain
-- [ ] Supabase RLS policies review
-- [ ] Load testing / SMS throughput validation
-- [ ] Logging structured output (already using pino)
-
----
-
-## Overall Progress
-
-| Phase | Status |
+| File | What changed |
 |---|---|
-| Phase 0 — Frontend Cleanup | ✅ Complete |
-| Phase 1 — Foundation | ✅ Complete |
-| Phase 2 — CRUD APIs | ✅ Complete |
-| Phase 3 — Broadcast Engine | ✅ Complete |
-| Phase 4 — Webhooks & Conversations | ✅ Complete |
-| Phase 5 — Frontend Cutover | ✅ Complete (1 uncommitted change) |
-| Phase 6 — Production Hardening | 🔲 Not started |
+| `backend/docs/per-manager-phone-numbers.md` | New — full strategy doc |
+| `manager-phone-strategy.md` | Brainstorming file — options narrowed to A (chosen) + G (future WhatsApp) |
+| `version-1.2.md` | Implementation plan — needs rewrite to match final decisions |
+
+---
+
+## Next Steps
+
+1. Rewrite `version-1.2.md` to match all final decisions above
+2. Implement step by step
