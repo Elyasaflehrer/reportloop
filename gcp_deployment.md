@@ -230,6 +230,7 @@ Edit **`frontend/.env.production`**:
 VITE_API_BASE_URL=<Cloud Run URL from Step 5>
 VITE_SUPABASE_URL=<your Supabase project URL>
 VITE_SUPABASE_ANON_KEY=<your Supabase anon key>
+VITE_PAGE_LIMIT=500
 ```
 
 > These values are safe to commit — they end up in the public JS bundle regardless. The Supabase anon key is designed to be public; security is enforced by Row Level Security policies in the database.
@@ -295,6 +296,7 @@ Go to: **GitHub repo → Settings → Secrets and variables → Actions**
 | `VITE_API_BASE_URL` | Cloud Run URL |
 | `VITE_SUPABASE_URL` | Supabase project URL |
 | `VITE_SUPABASE_ANON_KEY` | Supabase anon key |
+| `VITE_PAGE_LIMIT` | Max records fetched per list endpoint (default: 500) |
 
 ### Workflow file
 
@@ -388,6 +390,7 @@ jobs:
           VITE_API_BASE_URL: ${{ secrets.VITE_API_BASE_URL }}
           VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
           VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
+          VITE_PAGE_LIMIT: ${{ secrets.VITE_PAGE_LIMIT }}
 
       - uses: FirebaseExtended/action-hosting-deploy@v0
         with:

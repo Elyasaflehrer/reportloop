@@ -12,7 +12,7 @@ variable "region" {
 variable "backend_image" {
   description = "Full Docker image path including tag — set by CI after first build"
   type        = string
-  default     = "us-central1-docker.pkg.dev/reportloop-dev/reportloop/reportloop-backend:1.0.0"
+  default     = "us-central1-docker.pkg.dev/reportloop-dev/reportloop/reportloop-backend:latest"
 }
 
 variable "app_base_url" {

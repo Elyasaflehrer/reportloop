@@ -1,24 +1,73 @@
 # Version 2 — Planned Features
 
+## Supabase RLS Policies (moved from backend_implementation.md Step 24)
+
+Write Row Level Security policies on all tenant-scoped tables in Supabase.
+
+**Why both RLS + route-layer RBAC:**
+Route layer is the first line of defense (fast, flexible). RLS is defense in depth — even if a bug in our code queries the wrong data, Postgres itself rejects the read. Two independent layers means a bug in one doesn't become a data breach.
+
+**Example RLS policy for `Conversation`:**
+```sql
+CREATE POLICY "managers_see_own_conversations" ON conversations
+  FOR SELECT USING (
+    broadcast_id IN (
+      SELECT b.id FROM broadcasts b
+      JOIN schedules s ON s.id = b.schedule_id
+      WHERE s.manager_id = auth.uid()
+    )
+  );
+```
+
+Tables that need policies: `users`, `groups`, `group_members`, `manager_groups`, `questions`, `schedules`, `schedule_questions`, `schedule_recipients`, `broadcasts`, `conversations`, `messages`, `answers`.
+
+---
+
+## Rate Limiting — Per-route Tuning (moved from backend_implementation.md Step 25)
+
+v1 covers the global limit and the fire endpoint. The following are deferred:
+
+- Per-route tighter limits on remaining sensitive endpoints (e.g. `POST /users`, `PATCH /users/:id`)
+- IP allowlisting — restrict access to known office/VPN IPs if needed
+- Bot detection — e.g. block requests with no `User-Agent` or suspicious patterns
+
+---
+
+## Twilio Phone Number Per Manager (correctness issue + feature)
+
+A participant can belong to multiple managers' groups. If two managers fire a broadcast at the same time, both SMS come from the same Twilio number. When the participant replies, the webhook can't tell which manager's conversation the reply belongs to — it picks one arbitrarily.
+
+Per-manager phone numbers fixes the routing ambiguity: `From` + `To` together uniquely identify the conversation.
+
+Full plan deferred to v2.
+
+---
+
 ## Stale Session — Manager List Out of Sync
 
 If an admin reassigns a viewer's groups while the viewer is logged in, their manager list in the dropdown becomes stale until they re-login. Need to make a plan for detecting and handling this — options include periodic refresh of `/auth/me`, a manual "refresh" button, or a session TTL that forces re-login. No implementation yet, plan needed first.
+
+When a stale manager is selected and the backend rejects access (403), the viewer currently sees "Failed to load data. Please contact support." — acceptable for v1 since there is no data leak. Two longer-term options to consider:
+- **Option A:** Keep the stale manager visible but scope the data to only the viewer's own conversations (requires backend scoping logic).
+- **Option B:** Remove stale managers from the list on next /auth/me refresh, and add a "My Conversations" tab showing the viewer's own conversation history across all managers they ever belonged to.
+
+---
+
+## Improved Email Validation Error Messages
+
+Currently when an admin creates a user with an invalid email (e.g. `test@test` — missing a real domain), the backend Supabase invite call fails silently or the Zod validation returns a generic "Request failed 400" with no clear message shown to the user.
+
+**What to fix in v2:**
+
+1. **Frontend** — add a basic email regex check before submitting the form so the user sees a clear inline error immediately (e.g. "Please enter a valid email address").
+2. **Backend** — extract Zod field errors from the 400 response and surface them in the UI (currently `apiFetch` only reads `data.error.message`, which Zod's `flatten()` output doesn't have).
+3. **Supabase invite failures** — if Supabase rejects the invite email (e.g. domain doesn't exist), log a clear warning in the backend console AND return a user-facing message explaining that the user was created but the invite email failed.
 
 ---
 
 ## Manager Switcher — Loading State on Switch
 
 When the viewer switches managers, the conversation list re-fetches but currently shows no loading indicator. Add a visible loading state (spinner or skeleton rows) so the viewer knows the data is updating and doesn't think the screen is broken.
-
----
-
-## Correspondences Tab — UI/UX Redesign
-
-The current Correspondences tab (manager + participant) is not well organized. The information hierarchy needs to be rethought so users can easily navigate their broadcast history and conversations. Design work required before implementation.
-
-**Key data point:** schedules have a label/description — conversations should be grouped by that description (e.g. all "Weekly send" conversations together, all "Monthly review" conversations together).
-
-**Filtering:** users should be able to filter the view by question, by participant, by date/date range, and potentially by conversation status.
 
 ---
 
@@ -36,21 +85,13 @@ No backend changes needed. Google provider maps the user's Google account to a S
 
 ---
 
-## Improved Email Validation Error Messages
+## Correspondences Tab — UI/UX Redesign
 
-Currently when an admin creates a user with an invalid email (e.g. `test@test` — missing a real domain), the backend Supabase invite call fails silently or the Zod validation returns a generic "Request failed 400" with no clear message shown to the user.
+The current Correspondences tab (manager + participant) is not well organized. The information hierarchy needs to be rethought so users can easily navigate their broadcast history and conversations. Design work required before implementation.
 
-**What to fix in v2:**
+**Key data point:** schedules have a label/description — conversations should be grouped by that description (e.g. all "Weekly send" conversations together, all "Monthly review" conversations together).
 
-1. **Frontend** — add a basic email regex check before submitting the form so the user sees a clear inline error immediately (e.g. "Please enter a valid email address").
-2. **Backend** — extract Zod field errors from the 400 response and surface them in the UI (currently `apiFetch` only reads `data.error.message`, which Zod's `flatten()` output doesn't have).
-3. **Supabase invite failures** — if Supabase rejects the invite email (e.g. domain doesn't exist), log a clear warning in the backend console AND return a user-facing message explaining that the user was created but the invite email failed.
-
----
-
-## Frontend as a Proper Web Application
-
-✅ Done in v1.5 — migrated to `frontend/` (Vite + React + TypeScript).
+**Filtering:** users should be able to filter the view by question, by participant, by date/date range, and potentially by conversation status.
 
 ---
 
@@ -91,6 +132,12 @@ The following screens exist in the frontend but **show no data** because the bac
 
 ---
 
+## Frontend as a Proper Web Application
+
+✅ Done in v1.5 — migrated to `frontend/` (Vite + React + TypeScript).
+
+---
+
 ## BroadcastCompose — wire Send button to real API
 
 Currently the "Send" flow in `BroadcastCompose` is a simulated progress bar (fake). Needs to call:
@@ -102,46 +149,3 @@ Currently the "Send" flow in `BroadcastCompose` is a simulated progress bar (fak
 ## Dashboard — wire to real data
 
 `Dashboard` currently shows hardcoded KPI placeholders ("1 open delinquency", "2 rooms down"). Should be driven by real broadcast/conversation summary data once `GET /broadcasts` exists.
-
----
-
-## Twilio Phone Number Per Manager (correctness issue + feature)
-
-A participant can belong to multiple managers' groups. If two managers fire a broadcast at the same time, both SMS come from the same Twilio number. When the participant replies, the webhook can't tell which manager's conversation the reply belongs to — it picks one arbitrarily.
-
-Per-manager phone numbers fixes the routing ambiguity: `From` + `To` together uniquely identify the conversation.
-
-Full plan deferred to v2.
-
----
-
-## Rate Limiting — Per-route Tuning (moved from backend_implementation.md Step 25)
-
-v1 covers the global limit and the fire endpoint. The following are deferred:
-
-- Per-route tighter limits on remaining sensitive endpoints (e.g. `POST /users`, `PATCH /users/:id`)
-- IP allowlisting — restrict access to known office/VPN IPs if needed
-- Bot detection — e.g. block requests with no `User-Agent` or suspicious patterns
-
----
-
-## Supabase RLS Policies (moved from backend_implementation.md Step 24)
-
-Write Row Level Security policies on all tenant-scoped tables in Supabase.
-
-**Why both RLS + route-layer RBAC:**
-Route layer is the first line of defense (fast, flexible). RLS is defense in depth — even if a bug in our code queries the wrong data, Postgres itself rejects the read. Two independent layers means a bug in one doesn't become a data breach.
-
-**Example RLS policy for `Conversation`:**
-```sql
-CREATE POLICY "managers_see_own_conversations" ON conversations
-  FOR SELECT USING (
-    broadcast_id IN (
-      SELECT b.id FROM broadcasts b
-      JOIN schedules s ON s.id = b.schedule_id
-      WHERE s.manager_id = auth.uid()
-    )
-  );
-```
-
-Tables that need policies: `users`, `groups`, `group_members`, `manager_groups`, `questions`, `schedules`, `schedule_questions`, `schedule_recipients`, `broadcasts`, `conversations`, `messages`, `answers`.
