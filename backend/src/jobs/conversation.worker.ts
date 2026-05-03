@@ -49,6 +49,7 @@ async function processConversation(
                 include: { question: { select: { id: true, text: true } } },
                 orderBy: { questionId: 'asc' },
               },
+              manager: { select: { assignedPhone: true } },
             },
           },
         },
@@ -61,6 +62,12 @@ async function processConversation(
   if (!conversation) return
   if (conversation.status !== 'processing') return
   if (!conversation.user.phone) return
+
+  const from = conversation.broadcast.schedule.manager.assignedPhone
+  if (!from) {
+    console.error(`[conversation-worker] manager has no assigned phone for conversation ${conversationId} — skipping`)
+    return
+  }
 
   const questions = conversation.broadcast.schedule.scheduleQuestions.map(sq => sq.question)
 
@@ -124,7 +131,7 @@ async function processConversation(
 
   // Some answers still missing → send follow-up and wait for next reply
   try {
-    const twilioSid = await smsProvider.sendSms(conversation.user.phone, result.followUp)
+    const twilioSid = await smsProvider.sendSms(conversation.user.phone, result.followUp, from)
 
     await prisma.message.create({
       data: {

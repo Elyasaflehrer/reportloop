@@ -34,7 +34,13 @@ async function runReminderLadder(smsProvider: ISmsProvider) {
     },
     include: {
       user:      { select: { phone: true, smsOptedOut: true } },
-      broadcast: { select: { id: true } },
+      broadcast: {
+        include: {
+          schedule: {
+            include: { manager: { select: { assignedPhone: true } } },
+          },
+        },
+      },
       messages:  {
         where:   { role: 'ai' },
         orderBy: { sentAt: 'asc' },
@@ -63,8 +69,14 @@ async function runReminderLadder(smsProvider: ISmsProvider) {
       continue
     }
 
+    const from = conv.broadcast.schedule.manager.assignedPhone
+    if (!from) {
+      console.error(`[reminder-worker] manager has no assigned phone for conversation ${conv.id} — skipping`)
+      continue
+    }
+
     try {
-      await smsProvider.sendSms(conv.user.phone, originalBody)
+      await smsProvider.sendSms(conv.user.phone, originalBody, from)
 
       await prisma.conversation.update({
         where: { id: conv.id },

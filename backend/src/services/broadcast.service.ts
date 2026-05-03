@@ -22,12 +22,13 @@ export async function runBroadcast(
       scheduleQuestions: {
         include: { question: { select: { id: true, text: true } } },
       },
-      manager: { select: { id: true } },
+      manager: { select: { id: true, assignedPhone: true } },
     },
   })
 
   if (!schedule) throw new Error(`Schedule ${scheduleId} not found`)
   if (!schedule.active) throw new Error(`Schedule ${scheduleId} is inactive`)
+  if (!schedule.manager.assignedPhone) throw new Error(`Manager ${schedule.manager.id} has no assigned phone — broadcast blocked`)
 
   const questions = schedule.scheduleQuestions.map(sq => sq.question)
   if (questions.length === 0) throw new Error(`Schedule ${scheduleId} has no questions`)
@@ -57,6 +58,7 @@ export async function runBroadcast(
       participant,
       questions:   questions.map(q => q.text),
       questionIds: questions.map(q => q.id),
+      from:        schedule.manager.assignedPhone,
       smsProvider,
       aiProvider,
     })
@@ -126,10 +128,11 @@ async function processParticipant(params: {
   participant: { id: number; phone: string | null; smsOptedOut: boolean }
   questions:   string[]
   questionIds: number[]
+  from:        string
   smsProvider: ISmsProvider
   aiProvider:  IAiProvider
 }) {
-  const { broadcast, participant, questions, smsProvider, aiProvider } = params
+  const { broadcast, participant, questions, from, smsProvider, aiProvider } = params
 
   if (participant.smsOptedOut) return
   if (!participant.phone)      return
@@ -187,7 +190,7 @@ async function processParticipant(params: {
 
   // Send SMS
   try {
-    const twilioSid = await smsProvider.sendSms(participant.phone, body)
+    const twilioSid = await smsProvider.sendSms(participant.phone, body, from)
 
     await prisma.message.create({
       data: {
