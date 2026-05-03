@@ -159,6 +159,10 @@ export async function schedulesRoutes(app: FastifyInstance) {
     const body = createScheduleBody.safeParse(req.body)
     if (!body.success) return reply.status(400).send({ error: body.error.flatten() })
 
+    if (body.data.active && !req.user.assignedPhone) {
+      return reply.status(422).send({ error: { code: 'NO_PHONE_NUMBER', message: 'A phone number must be assigned before activating a schedule' } })
+    }
+
     const schedule = await prisma.schedule.create({
       data: { ...body.data, managerId: req.user.id },
       select: {
@@ -191,8 +195,14 @@ export async function schedulesRoutes(app: FastifyInstance) {
         deletedAt: null,
         ...(req.user.role === 'manager' && { managerId: req.user.id }),
       },
+      include: { manager: { select: { assignedPhone: true } } },
     })
     if (!existing) return reply.status(404).send({ error: 'Schedule not found' })
+
+    const isActivating = body.data.active === true && !existing.active
+    if (isActivating && !existing.manager.assignedPhone) {
+      return reply.status(422).send({ error: { code: 'NO_PHONE_NUMBER', message: 'A phone number must be assigned before activating a schedule' } })
+    }
 
     const schedule = await prisma.schedule.update({
       where:  { id: scheduleId },

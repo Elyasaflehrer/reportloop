@@ -71,18 +71,20 @@ export async function buildApp(): Promise<FastifyInstance> {
   })
 
   // ─── ROUTES ───────────────────────────────────────────────────────────────
-  // Registered here as each step is implemented:
+
+  // Single provider instance shared across all routes — null when Twilio is not configured
+  const smsProvider: ISmsProvider | null = config.twilio ? createSmsProvider() : null
+
   await app.register(healthRoutes)
   await app.register(authRoutes)
-  await app.register(usersRoutes)
+  await app.register(usersRoutes, { smsProvider })
   await app.register(groupsRoutes)
   await app.register(participantsRoutes)
   await app.register(questionsRoutes)
   await app.register(schedulesRoutes)
   await app.register(broadcastsRoutes)
 
-  if (config.twilio) {
-    const smsProvider: ISmsProvider = createSmsProvider()
+  if (smsProvider) {
     await app.register(webhooksRoutes, { smsProvider })
   }
 

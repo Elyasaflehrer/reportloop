@@ -1,9 +1,14 @@
 import { type FastifyInstance } from 'fastify'
 import { z } from 'zod'
+import type { Prisma } from '@prisma/client'
 import { prisma } from '../db.js'
 import { authenticate, requireRole } from '../middleware/rbac.js'
 import { supabaseAdmin } from '../supabase.js'
 import { config } from '../config.js'
+import type { ISmsProvider } from '../services/sms/sms.provider.interface.js'
+import { onManagerCreated, onManagerDemoted } from '../services/manager.service.js'
+import { provisionForManager, type PhoneProvisionSettings } from '../services/sms/phone-number.service.js'
+import { ProvisionLimitError, ProvisionFailedError } from '../services/sms/phone-number.errors.js'
 
 // ─── Validation schemas ───────────────────────────────────────────────────────
 
@@ -37,9 +42,33 @@ const listUsersQuery = z.object({
   search:  z.string().optional(),
 })
 
+// ─── Shared select ───────────────────────────────────────────────────────────
+
+const userSelect = {
+  id:            true,
+  supabaseId:    true,
+  name:          true,
+  email:         true,
+  phone:         true,
+  initials:      true,
+  title:         true,
+  role:          true,
+  active:        true,
+  assignedPhone: true,
+  updatedAt:     true,
+} as const satisfies Prisma.UserSelect
+
 // ─── Routes ──────────────────────────────────────────────────────────────────
 
-export async function usersRoutes(app: FastifyInstance) {
+export async function usersRoutes(app: FastifyInstance, opts: { smsProvider: ISmsProvider | null }) {
+
+  const phoneSettings: PhoneProvisionSettings = {
+    maxNumbers:     config.phone.maxNumbers,
+    numberCountry:  config.phone.numberCountry,
+    numberType:     config.phone.numberType,
+    webhookBaseUrl: config.app.baseUrl,
+  }
+
 
   // ─── GET /users ────────────────────────────────────────────────────────────
 
@@ -73,17 +102,18 @@ export async function usersRoutes(app: FastifyInstance) {
         take:    limit,
         orderBy: { name: 'asc' },
         select: {
-          id:         true,
-          name:       true,
-          email:      true,
-          phone:      true,
-          initials:   true,
-          title:      true,
-          role:       true,
-          active:     true,
-          smsOptedOut:true,
-          createdAt:  true,
-          updatedAt:  true,
+          id:            true,
+          name:          true,
+          email:         true,
+          phone:         true,
+          initials:      true,
+          title:         true,
+          role:          true,
+          active:        true,
+          smsOptedOut:   true,
+          assignedPhone: true,
+          createdAt:     true,
+          updatedAt:     true,
         },
       }),
       prisma.user.count({ where }),
@@ -105,17 +135,18 @@ export async function usersRoutes(app: FastifyInstance) {
     const user = await prisma.user.findFirst({
       where: { id: userId, deletedAt: null },
       select: {
-        id:          true,
-        name:        true,
-        email:       true,
-        phone:       true,
-        initials:    true,
-        title:       true,
-        role:        true,
-        active:      true,
-        smsOptedOut: true,
-        createdAt:   true,
-        updatedAt:   true,
+        id:            true,
+        name:          true,
+        email:         true,
+        phone:         true,
+        initials:      true,
+        title:         true,
+        role:          true,
+        active:        true,
+        smsOptedOut:   true,
+        assignedPhone: true,
+        createdAt:     true,
+        updatedAt:     true,
         groupMembers: {
           select: {
             group: { select: { id: true, name: true } },
@@ -155,15 +186,16 @@ export async function usersRoutes(app: FastifyInstance) {
       const user = await prisma.user.create({
         data: { name, email, phone, role, title, initials },
         select: {
-          id:        true,
-          name:      true,
-          email:     true,
-          phone:     true,
-          initials:  true,
-          title:     true,
-          role:      true,
-          active:    true,
-          createdAt: true,
+          id:            true,
+          name:          true,
+          email:         true,
+          phone:         true,
+          initials:      true,
+          title:         true,
+          role:          true,
+          active:        true,
+          assignedPhone: true,
+          createdAt:     true,
         },
       })
 
@@ -183,6 +215,11 @@ export async function usersRoutes(app: FastifyInstance) {
             data:  { supabaseId: inviteData.user.id },
           })
         }
+      }
+
+      // Eagerly provision a phone number for new managers — non-blocking, never throws
+      if (role === 'manager' && opts.smsProvider) {
+        void onManagerCreated(user.id, { prisma, smsProvider: opts.smsProvider, phoneSettings })
       }
 
       return reply.status(201).send(user)
@@ -232,23 +269,14 @@ export async function usersRoutes(app: FastifyInstance) {
     const existing = await prisma.user.findFirst({ where: { id: userId, deletedAt: null } })
     if (!existing) return reply.status(404).send({ error: 'User not found' })
 
+    const newRole               = body.data.role ?? existing.role
+    const wasDemotedFromManager = existing.role === 'manager' && newRole !== 'manager'
+    const wasPromotedToManager  = existing.role !== 'manager' && newRole === 'manager'
+
     try {
-      const user = await prisma.user.update({
-        where: { id: userId },
-        data:  body.data,
-        select: {
-          id:          true,
-          supabaseId:  true,
-          name:        true,
-          email:       true,
-          phone:       true,
-          initials:    true,
-          title:       true,
-          role:        true,
-          active:      true,
-          updatedAt:   true,
-        },
-      })
+      const user = wasDemotedFromManager
+        ? await onManagerDemoted(userId, body.data, { prisma, select: userSelect })
+        : await prisma.user.update({ where: { id: userId }, data: body.data, select: userSelect })
 
       // Keep Supabase user_metadata in sync so the JWT reflects the new role/name
       if (user.supabaseId && (body.data.role || body.data.name)) {
@@ -259,12 +287,53 @@ export async function usersRoutes(app: FastifyInstance) {
           .catch(err => req.log.warn({ err, userId }, '[users] failed to sync user_metadata to Supabase'))
       }
 
+      // Phone provisioning side-effect for promotions
+      if (wasPromotedToManager && opts.smsProvider) {
+        void onManagerCreated(userId, { prisma, smsProvider: opts.smsProvider, phoneSettings })
+      }
+
       const { supabaseId: _, ...rest } = user
       return reply.send(rest)
     } catch (err: any) {
       if (err.code === 'P2002') {
         const field = err.meta?.target?.[0] ?? 'field'
         return reply.status(409).send({ error: `A user with this ${field} already exists` })
+      }
+      throw err
+    }
+  })
+
+  // ─── POST /users/:id/provision-number ────────────────────────────────────
+  // Allows an admin to trigger provisioning for any manager, or a manager to
+  // self-provision after an eager provision failed at creation time.
+
+  app.post('/users/:id/provision-number', { preHandler: [authenticate, requireRole('admin', 'manager')] }, async (req, reply) => {
+    const { id } = req.params as { id: string }
+    const userId = parseInt(id, 10)
+    if (isNaN(userId)) return reply.status(400).send({ error: 'Invalid user id' })
+
+    // Managers may only provision their own number
+    if (req.user.role === 'manager' && req.user.id !== userId) {
+      return reply.status(403).send({ error: { code: 'FORBIDDEN', message: 'Managers may only provision their own number' } })
+    }
+
+    if (!opts.smsProvider) {
+      return reply.status(503).send({ error: { code: 'SMS_NOT_CONFIGURED', message: 'SMS provider is not configured' } })
+    }
+
+    const user = await prisma.user.findFirst({ where: { id: userId, deletedAt: null } })
+    if (!user) return reply.status(404).send({ error: 'User not found' })
+    if (user.role !== 'manager') return reply.status(400).send({ error: 'Phone numbers can only be provisioned for managers' })
+
+    try {
+      const assignedPhone = await provisionForManager(userId, { prisma, smsProvider: opts.smsProvider, phoneSettings })
+      return reply.send({ assignedPhone })
+    } catch (err) {
+      if (err instanceof ProvisionLimitError) {
+        return reply.status(409).send({ error: { code: err.code, message: err.message } })
+      }
+      if (err instanceof ProvisionFailedError) {
+        return reply.status(422).send({ error: { code: err.code, message: err.message } })
       }
       throw err
     }

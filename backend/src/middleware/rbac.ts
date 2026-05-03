@@ -6,11 +6,12 @@ import { supabaseAdmin } from '../supabase.js'
 // ─── REQUEST AUGMENTATION ────────────────────────────────────────────────────
 
 type AuthUser = {
-  id:         number
-  supabaseId: string
-  name:       string
-  email:      string | null
-  role:       UserRole
+  id:            number
+  supabaseId:    string
+  name:          string
+  email:         string | null
+  role:          UserRole
+  assignedPhone: string | null
 }
 
 declare module 'fastify' {
@@ -39,20 +40,20 @@ export async function authenticate(req: FastifyRequest, reply: FastifyReply) {
   // Primary lookup: fast path for users with a linked supabase_id
   let user = await prisma.user.findFirst({
     where: { supabaseId: supabaseUser.id, active: true, deletedAt: null },
-    select: { id: true, supabaseId: true, name: true, email: true, role: true },
+    select: { id: true, supabaseId: true, name: true, email: true, role: true, assignedPhone: true },
   })
 
   // First-login auto-link: covers invited users whose supabase_id wasn't linked yet
   if (!user && supabaseUser.email) {
     const unlinked = await prisma.user.findFirst({
       where: { email: supabaseUser.email, supabaseId: null, active: true, deletedAt: null },
-      select: { id: true, name: true, email: true, role: true },
+      select: { id: true, name: true, email: true, role: true, assignedPhone: true },
     })
     if (unlinked) {
       user = await prisma.user.update({
         where:  { id: unlinked.id },
         data:   { supabaseId: supabaseUser.id },
-        select: { id: true, supabaseId: true, name: true, email: true, role: true },
+        select: { id: true, supabaseId: true, name: true, email: true, role: true, assignedPhone: true },
       })
     }
   }

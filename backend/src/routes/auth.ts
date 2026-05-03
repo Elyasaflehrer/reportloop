@@ -124,15 +124,9 @@ export async function authRoutes(app: FastifyInstance) {
     '/integrations/status',
     { preHandler: [authenticate, requireRole('admin')] },
     async (_req, reply) => {
-      const maskPhone = (phone: string) =>
-        phone.length > 7
-          ? `${phone.slice(0, 4)}***${phone.slice(-4)}`
-          : '***'
-
       return reply.send({
         twilio: {
           configured: !!config.twilio,
-          ...(config.twilio && { fromNumber: maskPhone(config.twilio.fromNumber) }),
         },
         ai: {
           configured: !!config.ai,
