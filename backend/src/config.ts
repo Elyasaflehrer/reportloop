@@ -31,8 +31,15 @@ const schema = z.object({
   twilio: z.object({
     accountSid: z.string().min(1),
     authToken:  z.string().min(1),
-    fromNumber: z.string().min(1),
   }).nullable().default(null),
+
+  phone: z.object({
+    maxNumbers:    z.coerce.number().default(50),
+    numberCountry: z.string().default('US'),
+    numberType:    z.string().default('local'),
+  }),
+
+  webhookRetryAttempts: z.coerce.number().default(2),
 
   // Optional — required only when AI features are used (Phase 3).
   // Supports multiple providers: set AI_PROVIDER to 'anthropic' (default) or 'openai'.
@@ -66,8 +73,7 @@ const schema = z.object({
 
 const twilioConfigured =
   process.env.TWILIO_ACCOUNT_SID &&
-  process.env.TWILIO_AUTH_TOKEN &&
-  process.env.TWILIO_FROM_NUMBER
+  process.env.TWILIO_AUTH_TOKEN
 
 export const config = schema.parse({
   node_env:  process.env.NODE_ENV,
@@ -98,8 +104,15 @@ export const config = schema.parse({
   twilio: twilioConfigured ? {
     accountSid: process.env.TWILIO_ACCOUNT_SID,
     authToken:  process.env.TWILIO_AUTH_TOKEN,
-    fromNumber: process.env.TWILIO_FROM_NUMBER,
   } : null,
+
+  phone: {
+    maxNumbers:    process.env.PHONE_MAX_NUMBERS,
+    numberCountry: process.env.PHONE_NUMBER_COUNTRY,
+    numberType:    process.env.PHONE_NUMBER_TYPE,
+  },
+
+  webhookRetryAttempts: process.env.WEBHOOK_RETRY_ATTEMPTS,
 
   ai: process.env.ANTHROPIC_API_KEY || process.env.OPENAI_API_KEY
     ? {
@@ -134,6 +147,6 @@ export const config = schema.parse({
 if (!config.twilio) {
   console.warn(
     '[config] Twilio not configured — SMS features disabled. ' +
-    'Set TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_FROM_NUMBER to enable.'
+    'Set TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN to enable.'
   )
 }
