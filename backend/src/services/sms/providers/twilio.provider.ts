@@ -24,11 +24,27 @@ export class TwilioProvider implements ISmsProvider {
     this.client = twilio(cfg.accountSid, cfg.authToken)
   }
 
-  async sendSms(to: string, body: string): Promise<string> {
+  async provisionNumber(params: {
+    webhookUrl:  string
+    country:     string
+    numberType:  string
+  }): Promise<{ assignedPhone: string; assignedPhoneSid: string }> {
+    const { webhookUrl, country, numberType } = params
+    const available = await (this.client.availablePhoneNumbers(country) as any)[numberType].list({ limit: 1 })
+    if (!available.length) throw new Error(`No available ${numberType} numbers in ${country}`)
+    const purchased = await this.client.incomingPhoneNumbers.create({
+      phoneNumber: available[0].phoneNumber,
+      smsUrl:      webhookUrl,
+      smsMethod:   'POST',
+    })
+    return { assignedPhone: purchased.phoneNumber, assignedPhoneSid: purchased.sid }
+  }
+
+  async sendSms(to: string, body: string, from: string): Promise<string> {
     try {
       const message = await this.client.messages.create({
         to,
-        from:           this.cfg.fromNumber,
+        from,
         body,
         statusCallback: `${config.app.baseUrl}/webhooks/twilio`,
       })
@@ -55,6 +71,7 @@ export class TwilioProvider implements ISmsProvider {
     const body = req.body as Record<string, string>
     return {
       from:      body.From,
+      to:        body.To,
       body:      body.Body,
       messageId: body.MessageSid,
     }
