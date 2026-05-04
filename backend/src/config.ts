@@ -65,6 +65,10 @@ const schema = z.object({
     retentionDays:           z.coerce.number().default(0),
   }),
 
+  inboundWorker: z.object({
+    concurrency: z.coerce.number().int().min(1).max(50).default(5),
+  }),
+
   rateLimits: z.object({
     globalMax: z.coerce.number().default(100),
     fireMax:   z.coerce.number().default(5),
@@ -136,6 +140,10 @@ export const config = schema.parse({
     reminderCount:           process.env.CONVERSATION_REMINDER_COUNT,
     stuckTimeoutMinutes:     process.env.CONVERSATION_STUCK_TIMEOUT_MINUTES,
     retentionDays:           process.env.CONVERSATION_RETENTION_DAYS,
+  },
+
+  inboundWorker: {
+    concurrency: process.env.INBOUND_WORKER_CONCURRENCY,
   },
 
   rateLimits: {

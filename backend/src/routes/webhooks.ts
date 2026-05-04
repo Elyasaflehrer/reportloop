@@ -1,160 +1,80 @@
 import { type FastifyInstance } from 'fastify'
-import { prisma } from '../db.js'
-import { conversationQueue } from '../jobs/queue.js'
+import { inboundQueue } from '../jobs/queue.js'
+import type { InboundJob } from '../jobs/inbound.worker.js'
 import type { ISmsProvider } from '../services/sms/sms.provider.interface.js'
 
-export async function webhooksRoutes(app: FastifyInstance, opts: { smsProvider: ISmsProvider }) {
+// ─── POST /webhooks/twilio ────────────────────────────────────────────────────
+// Twilio webhook endpoint. Acts as a thin gate:
+//   1. Validate the X-Twilio-Signature header
+//   2. Extract the payload fields
+//   3. Run cheap guards (missing fields, MMS rejection)
+//   4. Enqueue to inboundQueue and return 200 immediately
+//
+// All business logic — DB lookups, conversation locking, message persistence,
+// downstream dispatch — lives in jobs/inbound.worker.ts. Returning 200 fast
+// keeps us well within Twilio's 15s webhook timeout. Failed Redis writes
+// return 500 so Twilio retries.
+
+export async function webhooksRoutes(
+  app: FastifyInstance,
+  opts: { smsProvider: ISmsProvider },
+) {
   const { smsProvider } = opts
 
-  // ─── POST /webhooks/twilio ─────────────────────────────────────────────────
-  // Handles both inbound SMS (Body param) and delivery status callbacks (MessageStatus param).
-  // Returns 200 immediately — real work is enqueued to avoid Twilio's 15s timeout.
-
-  app.post('/webhooks/twilio', async (req, reply) => {
-    // Signature validation — reject anything not from Twilio
-    if (!smsProvider.validateWebhookSignature(req)) {
-      return reply.status(403).send({ error: 'Invalid Twilio signature' })
-    }
-
-    const body = req.body as Record<string, string>
-
-    // ── Status callback (delivery failure) ──────────────────────────────────
-    if (body.MessageStatus && !body.Body) {
-      await handleStatusCallback(body)
-      return reply.status(200).send()
-    }
-
-    // ── Inbound SMS ──────────────────────────────────────────────────────────
-    if (body.Body) {
-      await handleInboundSms(body, smsProvider)
-      return reply.status(200).send()
-    }
-
-    return reply.status(200).send()
-  })
-}
-
-// ─── Inbound SMS handler ──────────────────────────────────────────────────────
-
-async function handleInboundSms(
-  body:        Record<string, string>,
-  smsProvider: ISmsProvider,
-) {
-  const from    = body.From    // E.164 phone number
-  const text    = (body.Body ?? '').trim()
-  const smsSid  = body.MessageSid
-
-  // ── Opt-out / opt-in handling ──────────────────────────────────────────────
-  const upperText = text.toUpperCase()
-
-  if (upperText === 'STOP' || upperText === 'STOPALL' || upperText === 'UNSUBSCRIBE' || upperText === 'CANCEL' || upperText === 'QUIT') {
-    const user = await prisma.user.findFirst({ where: { phone: from, deletedAt: null } })
-    if (user) {
-      await prisma.user.update({ where: { id: user.id }, data: { smsOptedOut: true } })
-      await prisma.conversation.updateMany({
-        where: { userId: user.id, status: { notIn: ['completed', 'failed', 'timed_out', 'superseded'] } },
-        data:  { status: 'failed', failedAt: new Date(), failReason: 'OPT_OUT' },
-      })
-    }
-    return
-  }
-
-  if (upperText === 'START' || upperText === 'UNSTOP' || upperText === 'YES') {
-    const user = await prisma.user.findFirst({ where: { phone: from, deletedAt: null } })
-    if (user) {
-      await prisma.user.update({ where: { id: user.id }, data: { smsOptedOut: false } })
-    }
-    return
-  }
-
-  // ── Idempotency — skip if this Twilio SID was already processed ────────────
-  const duplicate = await prisma.message.findUnique({ where: { twilioSid: smsSid } })
-  if (duplicate) return
-
-  // ── Find the participant ───────────────────────────────────────────────────
-  const user = await prisma.user.findFirst({
-    where: { phone: from, deletedAt: null },
-  })
-
-  if (!user) {
-    await prisma.inboundAuditLog.create({
-      data: { fromPhone: from, body: text, reason: 'NO_CONVERSATION' },
-    })
-    return
-  }
-
-  // ── Find the open conversation ─────────────────────────────────────────────
-  const conversation = await prisma.conversation.findFirst({
-    where:   { userId: user.id, status: { notIn: ['completed', 'failed', 'timed_out', 'superseded'] } },
-    orderBy: { startedAt: 'desc' },
-  })
-
-  if (!conversation) {
-    await prisma.inboundAuditLog.create({
-      data: { fromPhone: from, body: text, reason: 'NO_CONVERSATION' },
-    })
-    return
-  }
-
-  // ── Out-of-turn guard — only process if awaiting_reply ────────────────────
-  // Atomic update: only succeeds if status is exactly 'awaiting_reply'
-  const locked = await prisma.conversation.updateMany({
-    where: { id: conversation.id, status: 'awaiting_reply' },
-    data:  { status: 'processing', lastMessageAt: new Date() },
-  })
-
-  if (locked.count === 0) {
-    await prisma.inboundAuditLog.create({
-      data: {
-        fromPhone:      from,
-        body:           text,
-        conversationId: conversation.id,
-        reason:         conversation.status === 'processing' ? 'OUT_OF_TURN' : 'SESSION_CLOSED',
-      },
-    })
-    return
-  }
-
-  // ── Save the inbound message ───────────────────────────────────────────────
-  await prisma.message.create({
-    data: {
-      conversationId: conversation.id,
-      role:           'participant',
-      body:           text,
-      twilioSid:      smsSid,
+  app.post(
+    '/webhooks/twilio',
+    {
+      // Exempt from the global @fastify/rate-limit (Case 14). Signature
+      // validation already filters non-Twilio requests, so there's no abuse
+      // risk from skipping the rate limiter on this route.
+      config: { rateLimit: false },
     },
-  })
+    async (req, reply) => {
+      // ── Signature validation (Case 23) ──────────────────────────────────────
+      // Same outcome for invalid signature and unexpected SDK throw — return
+      // 403 either way so non-Twilio callers can't probe for differences.
+      try {
+        if (!smsProvider.validateWebhookSignature(req)) {
+          return reply.status(403).send()
+        }
+      } catch {
+        return reply.status(403).send()
+      }
 
-  // ── Enqueue conversation processing ───────────────────────────────────────
-  await conversationQueue.add(
-    'process',
-    { conversationId: conversation.id },
-    { jobId: `conv:${conversation.id}:${smsSid}` },
+      // ── Field extraction ────────────────────────────────────────────────────
+      const raw    = req.body as Record<string, string>
+      const from   = raw.From          ?? ''
+      const to     = raw.To            ?? ''
+      const text   = (raw.Body ?? '').trim()
+      const smsSid = raw.MessageSid ?? raw.SmsSid ?? ''
+      const status = raw.MessageStatus ?? ''
+
+      // ── Missing-fields guard (Cases 6, 16, 17, 25) ──────────────────────────
+      // Drop malformed payloads silently with 200 — Twilio shouldn't retry.
+      if (!from || !to || !smsSid) {
+        req.log.warn({ from, to, smsSid }, '[webhook] missing required fields')
+        return reply.status(200).send()
+      }
+
+      // ── MMS guard (Case 26) ─────────────────────────────────────────────────
+      // SMS only — multimedia messages are dropped before Redis write.
+      if (parseInt(raw.NumMedia ?? '0') > 0) {
+        req.log.info({ from, to, smsSid }, '[webhook] MMS rejected — SMS only')
+        return reply.status(200).send()
+      }
+
+      // ── Enqueue + return ────────────────────────────────────────────────────
+      // jobId: smsSid is Layer 1 idempotency — duplicate Twilio retries while
+      // the job is still in the queue are deduped by BullMQ. Layer 2 lives in
+      // the worker (message.findUnique by twilioSid).
+      const data: InboundJob = { from, to, text, smsSid, status }
+      try {
+        await inboundQueue.add('inbound', data, { jobId: smsSid })
+      } catch (err) {
+        req.log.error({ err }, '[webhook] Redis unavailable — enqueue failed')
+        return reply.status(500).send()  // Twilio will retry the webhook
+      }
+      return reply.status(200).send()
+    },
   )
-}
-
-// ─── Status callback handler ──────────────────────────────────────────────────
-
-async function handleStatusCallback(body: Record<string, string>) {
-  const smsSid = body.SmsSid ?? body.MessageSid
-  const status = body.MessageStatus
-
-  // Only act on hard failures
-  if (!['failed', 'undelivered'].includes(status)) return
-
-  const message = await prisma.message.findUnique({
-    where:  { twilioSid: smsSid },
-    select: { conversationId: true },
-  })
-
-  if (!message) return
-
-  await prisma.conversation.update({
-    where: { id: message.conversationId },
-    data:  {
-      status:     'failed',
-      failedAt:   new Date(),
-      failReason: 'TWILIO_DELIVERY_FAILED',
-    },
-  })
 }

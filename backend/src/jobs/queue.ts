@@ -15,9 +15,28 @@ export const broadcastQueue = new Queue('broadcast', {
   },
 })
 
+// ─── Inbound queue ────────────────────────────────────────────────────────────
+// Jobs enqueued by the Twilio webhook (routes/webhooks.ts) for any inbound
+// payload — SMS replies, STOP/START opt-out, and delivery status callbacks.
+// Each job carries an InboundJob (see jobs/inbound.worker.ts).
+//
+// Retry policy is more aggressive than other queues — webhook deliveries are
+// time-sensitive and DB blips should recover fast (~31s total window).
+
+export const inboundQueue = new Queue('inbound', {
+  connection: redis,
+  defaultJobOptions: {
+    attempts:    5,
+    backoff:     { type: 'exponential', delay: 1000 },
+    removeOnComplete: { count: 200 },
+    removeOnFail:     { count: 500 },
+  },
+})
+
 // ─── Conversation queue ───────────────────────────────────────────────────────
-// Jobs enqueued by the inbound webhook when a participant replies.
-// Each job carries { conversationId, messageBody, from }.
+// Jobs enqueued by inbound.worker.ts after a participant reply has been
+// validated, locked, and persisted. Drives AI processing of the conversation.
+// Each job carries { conversationId }.
 
 export const conversationQueue = new Queue('conversation', {
   connection: redis,
