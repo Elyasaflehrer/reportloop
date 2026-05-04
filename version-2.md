@@ -146,6 +146,50 @@ Currently the "Send" flow in `BroadcastCompose` is a simulated progress bar (fak
 
 ---
 
-## Dashboard — wire to real data
+## Deferred from Step 16 — Webhook Routing
+
+### Per-number opt-out
+
+Currently STOP opts the participant out of the entire platform globally — any STOP from any
+manager number applies platform-wide. This was an intentional v1 simplification.
+
+**What per-number opt-out would require:**
+- A `UserOptOut` join table: `(userId, managerPhone)` — one row per participant/number pair
+- `handleOptOut(from, to)` reads this table instead of the global `smsOptedOut` flag
+- `handleOptIn(from, to)` removes only the matching row
+- Compliance note: Twilio still applies global carrier-level blocks on STOP — per-number
+  opt-out is a product-layer preference on top of Twilio's behavior, not a replacement
+
+---
+
+### Participant-initiated conversations
+
+Currently, if a participant texts a manager's number with no open conversation, the webhook
+logs a warning and returns 200. No new conversation is created.
+
+**Future behavior:** participant texts a manager's number → if no open conversation, create
+a new one on-the-fly and route the message into it. Requires:
+- A product decision: which schedule template does the new conversation attach to?
+- A new `conversation.create` code path in `handleRegularMessage` (Case 5)
+- A UI change so managers can see and respond to participant-initiated threads
+
+---
+
+### Redis-down stuck conversation cleanup job
+
+**The scenario:** lock + `message.create` committed in DB (in `$transaction`), but the
+subsequent `conversationQueue.add` fails because Redis is unavailable → the BullMQ job
+is never queued → conversation stays stuck in `processing` forever.
+
+The `$transaction` fix (Case 13) does not help here — the DB transaction already committed
+before the queue write attempt.
+
+**What's needed in v2:**
+- A periodic cleanup job (cron or BullMQ repeatable) that finds conversations stuck in
+  `processing` with a `lastMessageAt` older than N minutes and re-enqueues them
+- Or: a DB flag `enqueueConfirmedAt` on `Message` — set it after `conversationQueue.add`
+  succeeds; the cleanup job looks for messages where it's null
+
+---
 
 `Dashboard` currently shows hardcoded KPI placeholders ("1 open delinquency", "2 rooms down"). Should be driven by real broadcast/conversation summary data once `GET /broadcasts` exists.

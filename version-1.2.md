@@ -18,6 +18,7 @@ Full architecture: `backend/docs/per-manager-phone-numbers.md`
 | `backend/src/services/sms/phone-number.errors.ts` | `ProvisionLimitError`, `ProvisionFailedError` |
 | `backend/src/services/sms/phone-number.service.ts` | 3-step `provisionForManager` logic |
 | `backend/src/services/manager.service.ts` | Manager lifecycle — `onManagerCreated` |
+| `backend/src/jobs/inbound.worker.ts` | Inbound webhook handlers — opt-out / opt-in / status callback / regular message |
 
 ---
 
@@ -25,7 +26,7 @@ Full architecture: `backend/docs/per-manager-phone-numbers.md`
 
 | File | What changes |
 |---|---|
-| `backend/prisma/schema.prisma` | Add `assignedPhone` + `assignedPhoneSid` to User |
+| `backend/prisma/schema.prisma` | Add `assignedPhone` + `assignedPhoneSid` to User; add `toPhone` to `InboundAuditLog` |
 | `backend/src/config.ts` | Remove `fromNumber`, add phone/webhook config |
 | `backend/src/middleware/rbac.ts` | Add `assignedPhone` to `AuthUser` + DB select |
 | `backend/src/services/sms/sms.provider.interface.ts` | `from` required, `provisionNumber`, `to` in payload |
@@ -34,7 +35,9 @@ Full architecture: `backend/docs/per-manager-phone-numbers.md`
 | `backend/src/routes/users.ts` | Accept `smsProvider`, provision on create, new endpoint |
 | `backend/src/routes/auth.ts` | Remove `fromNumber` from `/integrations/status` |
 | `backend/src/routes/schedules.ts` | Enforce inactive when manager has no `assignedPhone` |
-| `backend/src/routes/webhooks.ts` | `To`+`From` routing, retry logic |
+| `backend/src/routes/webhooks.ts` | Rewrite as thin gate — validate signature, extract fields, enqueue to `inboundQueue`, return 200 |
+| `backend/src/jobs/queue.ts` | Add `inboundQueue` alongside `conversationQueue` |
+| `backend/src/index.ts` | Register `startInboundWorker()` (guarded by Twilio configured) |
 | `backend/src/services/broadcast.service.ts` | Guard + required `from` |
 | `backend/src/jobs/conversation.worker.ts` | Required `from` |
 | `backend/src/jobs/reminder.worker.ts` | Required `from` |
@@ -822,214 +825,41 @@ Same pattern as Step 14 — extend select, guard for null, pass `assignedPhone` 
 
 ## Step 16 — Webhook routing
 
-**File:** `backend/src/routes/webhooks.ts`
+Rewrite Twilio webhook from synchronous handler to two-queue async pipeline:
+route returns 200 immediately, BullMQ worker handles all business logic with
+retries.
 
----
+**Architecture, edge cases, file specs, and end-to-end test plan:**
+→ `backend/docs/inbound-webhook-routing.md`
 
-### Edge Cases
+**Implementation decisions (10 design decisions, locked):**
+→ `step-16-implementation-plan.md`
 
-#### Handled in existing code — must re-implement in `inbound.worker.ts`
+### Implementation order — two sub-steps
 
-| # | Case | How it's resolved |
-|---|---|---|
-| 1 | **Duplicate Twilio SID** — Twilio retries a webhook that already succeeded | `prisma.message.findUnique({ where: { twilioSid: smsSid } })` — if found, log `req.log.warn({ smsSid, from, to }, '[webhook] duplicate Twilio SID — already processed')` then return 200 |
-| 2 | **STOP / START** — participant opts out or back in | Global opt-out: any STOP from any manager number opts the participant out of the entire platform. Extracted to `handleOptOut` / `handleOptIn` functions (Option C dispatch). STOP wraps `user.update` + `conversation.updateMany` in `$transaction` (Case 29). Per-number opt-out deferred — would require a `UserOptOut` join table |
-| 3 | **Out-of-turn reply** — participant replies when conversation is not in `awaiting_reply` state | Atomic `updateMany` lock: only succeeds if `status === 'awaiting_reply'`. If `count === 0`, logs to `inboundAuditLog` with granular reason codes: `OUT_OF_TURN` (processing), `SESSION_COMPLETED` (completed), `SESSION_TIMED_OUT` (timed_out), `SESSION_SUPERSEDED` (superseded). Audit log write wrapped in `.catch()` (Case 27). `SESSION_COMPLETED` is a forward-looking signal for future participant-initiated conversation re-open flow |
-| 4 | **Unknown participant** — `From` number not in DB | `prisma.user.findFirst({ where: { phone: from } })` returns null → audit log with reason `UNKNOWN_PARTICIPANT` + return 200. Permanent failure — Twilio must not retry. Audit log write wrapped in `.catch()` (Case 27) |
-| 5 | **No open conversation** — participant is known but has no active conversation | `req.log.warn({ from, to }, '[webhook] no open conversation for participant')` + return 200. No audit log entry for now. Future: this is where participant-initiated conversation creation will hook in |
+**16a — Schema migration** *(one prisma change + one SQL statement)*
 
----
+| Action | Where |
+|---|---|
+| Add `toPhone String? @map("to_phone")` to `InboundAuditLog` | `prisma/schema.prisma` |
+| `ALTER TABLE inbound_audit_logs ADD COLUMN to_phone TEXT` | Supabase SQL editor |
 
-#### Not yet resolved — need to implement
+Done first — column must exist in prod before any 16b code references it.
 
-| # | Case | How to resolve |
-|---|---|---|
-| 6 | **`To` field empty or missing** — malformed request, `parseInboundWebhook` returns empty string | Guard `if (!to)` before any DB call → return 200 + warn log |
-| 7 | **Unknown manager number** — `To` does not match any manager's `assignedPhone` | Single query `{ assignedPhone: to, role: 'manager', deletedAt: null }` → null → `req.log.info` + return 200. In debug mode: second query finds why — number not in system / soft-deleted / demoted — each logged separately at `req.log.debug`. Extra query only runs when `req.log.isLevelEnabled('debug')` — zero cost in production |
-| 8 | **Manager demoted or soft-deleted, their number still active in Twilio** | Covered by case 7 — role + deletedAt filters exclude them. Reason surfaced in debug log |
-| 9 | **Participant texts the wrong manager's number** — open conversation exists but with a different manager | Theoretical in normal usage — phones always reply to the number that sent the message. Only possible if participant manually composes to a wrong number or via number recycling. Handled for free by `managerId` filter → falls to case 5 → warn log + 200 |
-| 10 | **Transient DB error** — brief connection blip or DB restart | Handled by BullMQ retry policy on `inbound.worker.ts`. Webhook already returned 200 — DB work happens in the worker. If worker fails, BullMQ retries with backoff. `withRetry` no longer needed in the webhook handler |
-| 11 | **Participant has open conversations with two different managers simultaneously** | Normal production scenario — participant receives broadcasts from two managers. Each reply goes to the number it came from (phone routing). `managerId` filter isolates each thread correctly — no cross-routing possible |
-| 12 | **Opted-out participant sends a regular reply (not STOP)** — `smsOptedOut: true` but participant sends a normal message | Twilio already auto-replies "You have opted out. Reply START to resubscribe." — we cannot send our own reply (outbound blocked). Add explicit `smsOptedOut` check after participant lookup → `log.info({ from, to }, '[webhook] message from opted-out participant — handled by Twilio auto-reply')` + return 200. Must check before Case 5 to log the correct reason |
-| 13 | **Conversation stuck in `processing` after write failure + BullMQ retry** — lock set, `message.create` fails, worker throws, BullMQ retries, but conversation already in `processing` → lock fails → message lost | Wrap lock + `message.create` in a `$transaction`. If `message.create` fails → lock rolls back → conversation stays `awaiting_reply` → BullMQ retries from a clean slate |
-| 14 | **Webhook rate-limited** — global `@fastify/rate-limit` (`global: true`) applies to all routes including `/webhooks/twilio` | Set `config: { rateLimit: false }` on the webhook route. Signature validation already filters non-Twilio requests — no abuse risk from exempting this route |
-| 15 | **`parseInboundWebhook` must be called first** — originally needed to ensure consistent field access | Superseded by two-queue architecture. Route handler extracts fields directly from raw body (`raw.From`, `raw.To` etc.) and enqueues `{ from, to, text, smsSid, status }`. Worker receives already-clean fields — `parseInboundWebhook` no longer needed in the webhook path |
-| 16 | **`from` is empty or missing** | Collapsed into case 6 guard — `if (!from \|\| !to \|\| !smsSid)` → warn + return 200 before Redis write |
-| 17 | **`smsSid` is empty or missing** | Collapsed into case 6 guard — `if (!from \|\| !to \|\| !smsSid)` → warn + return 200 before Redis write |
-| 18 | **Message body too long for DB column** — concatenated SMS can be ~1600 chars; `message.create` throws Prisma `P2000` | In inbound worker: catch `P2000` → `log.warn` + return without rethrowing → BullMQ marks job complete, no retry. Future: truncate or store overflow separately |
-| 19 | **Redis down when enqueueing to `conversationQueue`** — lock + `message.create` committed in DB, but `conversationQueue.add` fails → worker throws → BullMQ retries → lock fails (already `processing`) → conversation stuck | Still deferred. `$transaction` fix (case 13) does not help here — DB already committed before queue write. Needs a cleanup job or a DB flag to detect "message saved but not enqueued" |
-| 20 | **Phone number recycled mid-conversation** — Manager A broadcasts, gets demoted, number recycled to Manager B, participant replies to that number | Manager lookup finds Manager B. Conversation lookup filtered by `managerId: Manager B` finds nothing (participant has no open thread with Manager B) → falls to case 5 → warn log + 200. Manager A's conversation already soft-deleted on demotion. Acceptable by design — documented known behavior |
-| 21 | **Whitespace-only body** — `text` is empty string after `.trim()` | Guard `if (!text)` in worker before lock → `log.debug({ from, to, smsSid }, '[webhook] empty body — discarded')` + return. No audit log. Passing empty text through would trigger the AI with no input |
-| 22 | **`toPhone` missing from audit log** — `inboundAuditLog` only records `fromPhone`; with per-manager routing you can't tell which manager's number a lost reply was sent to | Include in Step 16. Add `toPhone String? @map("to_phone")` to `InboundAuditLog` model + migration. Pass `to` in every `inboundAuditLog.create` call in the worker. Historical records without the field remain as-is |
-| 23 | **Signature validation throws** — Twilio SDK throws unexpectedly (missing config, network) → crashes handler | Wrap `validateWebhookSignature` in try/catch → return 403 on any throw. Both invalid signature and unexpected throw return 403 — same outcome, one block |
-| 24 | **Pre-migration replies** — N/A. First deployment — no old global number ever existed |
-| 25 | **`handleStatusCallback` with missing SID** — `body.SmsSid` and `body.MessageSid` both absent → Prisma throws on `findUnique({ where: { twilioSid: undefined } })` | Resolved by route-level guard — `smsSid = raw.MessageSid ?? raw.SmsSid ?? ''` + `if (!smsSid)` block drops the request before enqueue |
-| 26 | **MMS (multimedia messages)** — Twilio forwards MMS to the same webhook; `body.NumMedia` > 0 means attachments exist | MMS not supported. Guard in route handler before enqueue: `if (parseInt(raw.NumMedia ?? '0') > 0)` → `log.info` + return 200. Rejected before Redis write |
-| 27 | **`inboundAuditLog.create` failures not caught** — audit log write throws on DB error → worker crashes → BullMQ retries endlessly for a non-critical write | Wrap every `inboundAuditLog.create` in `.catch(err => log.warn(...))` — a failed log write must never stop message processing |
-| 28 | **`handleStatusCallback` overwrites a completed conversation** — delivery failure callback arrives late after conversation already `completed` → sets `status: 'failed'` with no guard | Add `status: { notIn: ['completed'] }` to the `conversation.update` where clause in `handleStatusCallback` |
-| 29 | **STOP handling is not atomic** — `user.update` (smsOptedOut: true) and `conversation.updateMany` (status: failed) are separate operations; if `conversation.updateMany` fails, participant is opted out but active conversations remain open → workers keep sending | Wrap both in `$transaction` inside `handleOptOut` |
+**16b — Inbound pipeline** *(four files, one commit, one end-to-end test)*
 
----
+| File | Role |
+|---|---|
+| `jobs/queue.ts` | Add `inboundQueue` alongside `conversationQueue` |
+| `routes/webhooks.ts` | Thin gate — validate, extract, enqueue, return 200 |
+| `jobs/inbound.worker.ts` *(new)* | All handlers + dispatch |
+| `index.ts` | Register `startInboundWorker()` |
 
-### Architecture — two-queue async
+These four files form one inbound pipeline and cannot ship independently.
+End-to-end test (real SMS → DB row) is the only meaningful gate.
 
-Twilio webhook returns 200 immediately after persisting the raw payload to Redis.
-No message loss. No 15s timeout risk. BullMQ retries handle all failures.
-
-```
-Twilio → webhooks.ts → inboundQueue (Redis) → return 200
-                              ↓
-                     inbound.worker.ts
-                       ├── handleOptOut        ($transaction)
-                       ├── handleOptIn
-                       ├── handleStatusCallback
-                       └── handleRegularMessage → conversationQueue
-                                                        ↓
-                                               conversation.worker.ts
-```
-
----
-
-### File structure
-
-**`backend/src/routes/webhooks.ts`** — signature validation + enqueue + return 200 only:
-```
-- route registered with config: { rateLimit: false }  (Case 14)
-- validateWebhookSignature (try/catch → 403)
-- extract: from, to, text, smsSid, status from raw body
-- guard: !from || !to || !smsSid → warn + return 200
-- guard: NumMedia > 0 → log.info + return 200
-- try: inboundQueue.add({ from, to, text, smsSid, status }, { jobId: smsSid })
-  catch: log.error + return 500 (Twilio retries)
-- return 200
-```
-
-**`backend/src/jobs/inbound.worker.ts`** — all business logic (new file):
-```
-- isOptOut(text)              keyword helper
-- isOptIn(text)               keyword helper
-- handleOptOut(from)          $transaction: user.update + conversation.updateMany
-- handleOptIn(from)           user.update smsOptedOut: false
-- handleStatusCallback(...)   guard missing SID, guard completed conversation. Signature: (smsSid, status) only — never use from/to here (reversed for outbound callbacks: From=manager, To=participant)
-- handleRegularMessage(from, to, text, smsSid, log):
-    1. Guard !text → log.debug + return                                    (Case 21)
-    2. message.findUnique(smsSid) → if found: log.warn + return            (Case 1, Layer 2)
-    3. findFirst participant { phone: from, deletedAt: null }
-       → null: auditLog({ fromPhone, toPhone, UNKNOWN_PARTICIPANT }) + return  (Case 4)
-    4. if smsOptedOut: log.info + return                                   (Case 12)
-    5. findFirst manager { assignedPhone: to, role: manager, deletedAt: null }
-       → null: log.info + debug query + return                             (Case 7)
-    6. findFirst conversation { userId, managerId, status not terminal }
-       → null: log.warn + return                                           (Case 5)
-    7. $transaction:
-         updateMany conversation { id, status: awaiting_reply } → processing  (lock)
-         → count === 0: auditLog({ reason code }) + return                 (Case 3)
-         message.create({ conversationId, role, body, twilioSid })
-         → P2000: log.warn + return                                        (Case 18)
-    8. conversationQueue.add(conversationId)                               (Case 19 known gap)
-    All auditLog.create calls wrapped in .catch(log.warn)                  (Case 27)
-```
-
-BullMQ retry policy: `attempts: 5, backoff: { type: 'exponential', delay: 1000 }`
-Retries at 1s, 2s, 4s, 8s, 16s (~31s total window). After 5 failures → job moves to `failed` state for manual inspection.
-
-Two-layer idempotency:
-- **Layer 1** — `jobId: smsSid` in BullMQ: deduplicates jobs still in the queue (waiting/active). Fast Redis lookup, zero DB cost. Covers quick Twilio retries.
-- **Layer 2** — `message.findUnique({ twilioSid: smsSid })` in worker: catches delayed retries after the job already completed and cleared from BullMQ. Once a job is gone from the queue, its jobId is no longer protected — the DB check is the final safety net.
-
-Worker dispatch order:
-```ts
-if (status)          return handleStatusCallback(smsSid, status)
-if (isOptOut(text))  return handleOptOut(from)
-if (isOptIn(text))   return handleOptIn(from)
-return handleRegularMessage(from, to, text, smsSid, log)
-```
-Status callbacks first (no text content). STOP/START before routing. Regular message last.
-
-**`backend/src/jobs/queue.ts`** — add `inboundQueue` alongside `conversationQueue`:
-`removeOnComplete: { count: 200 }, removeOnFail: { count: 500 }` — matches existing queue settings
-
-**`backend/src/index.ts`** — register `startInboundWorker()` alongside existing workers, guarded by Twilio configured (same guard as `conversationWorker`)
-
-**Shared job type** — defined in `inbound.worker.ts`, imported in `webhooks.ts`:
-```ts
-export type InboundJob = {
-  from:   string   // participant's phone (E.164)
-  to:     string   // manager's assignedPhone (E.164)
-  text:   string   // trimmed body — empty for status callbacks
-  smsSid: string   // Twilio SID — used as BullMQ jobId for deduplication
-  status: string   // non-empty = status callback, empty = inbound SMS
-}
-```
-
----
-
-### Field extraction (top of route handler)
-
-```ts
-const raw    = req.body as Record<string, string>
-const from   = raw.From           ?? ''
-const to     = raw.To             ?? ''
-const text   = (raw.Body ?? '').trim()
-const smsSid = raw.MessageSid ?? raw.SmsSid ?? ''
-const status = raw.MessageStatus  ?? ''
-
-if (!from || !to || !smsSid) {
-  req.log.warn({ from, to, smsSid }, '[webhook] missing required fields')
-  return reply.status(200).send()
-}
-
-if (parseInt(raw.NumMedia ?? '0') > 0) {
-  req.log.info({ from, to, smsSid }, '[webhook] MMS not supported — discarded')
-  return reply.status(200).send()
-}
-
-try {
-  await inboundQueue.add('inbound', { from, to, text, smsSid, status }, { jobId: smsSid })
-} catch (err) {
-  req.log.error({ err }, '[webhook] Redis unavailable — enqueue failed')
-  return reply.status(500).send()  // Twilio retries
-}
-return reply.status(200).send()
-```
-
----
-
-- [ ] Webhook routing updated
-
----
-
-## Test — Section E (Webhooks)
-
-Requires a publicly reachable webhook URL (ngrok or deployed env).
-
-**Happy path — known participant, known manager number:**
-- Send a real SMS from your phone to the manager's provisioned number
-- [ ] New inbound message record created in DB, linked to the correct conversation
-- [ ] Message body matches what you sent
-- [ ] 200 returned to Twilio (check Twilio delivery logs)
-
-**Two managers, same participant:**
-- Two managers each have their own provisioned number
-- Participant texts Manager A's number → routes to Manager A's conversation
-- Participant texts Manager B's number → routes to Manager B's conversation
-- [ ] No cross-routing
-
-**Unknown participant (permanent failure):**
-- Send SMS from an unregistered phone number
-- [ ] 200 returned (Twilio does not retry)
-- [ ] Warning logged: `"Inbound SMS from unknown participant"`
-
-**Unknown manager number (permanent failure):**
-- POST to `/webhooks/twilio` with a `To` that matches no manager
-- [ ] 200 returned
-- [ ] Warning logged: `"Inbound SMS to unknown manager number"`
-
-**Transient DB error (BullMQ retries):**
-- Simulate DB failure while inbound worker is processing
-- [ ] Webhook always returns 200 — Twilio never retries
-- [ ] BullMQ retries worker job up to 5 times with exponential backoff
-- [ ] After 5 failures: job moves to `failed` state — visible in Bull Board
+- [ ] 16a — schema applied (`prisma` + Supabase SQL)
+- [ ] 16b — inbound pipeline wired (4 files + end-to-end test pass)
 
 ---
 
