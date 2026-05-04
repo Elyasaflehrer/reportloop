@@ -34,7 +34,7 @@ const schema = z.object({
   }).nullable().default(null),
 
   phone: z.object({
-    maxNumbers:    z.coerce.number().default(50),
+    maxNumbers:    z.coerce.number().default(2),
     numberCountry: z.string().default('US'),
     numberType:    z.string().default('local'),
   }),
