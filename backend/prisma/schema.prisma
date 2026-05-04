@@ -259,6 +259,7 @@ model Answer {
 model InboundAuditLog {
   id             Int      @id @default(autoincrement())
   fromPhone      String   @map("from_phone")
+  toPhone        String?  @map("to_phone")
   body           String
   conversationId Int?     @map("conversation_id")
   reason         String
