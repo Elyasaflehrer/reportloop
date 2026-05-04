@@ -25,6 +25,7 @@ export const AdminUsersTab = () => {
   const [bulkGroupModalOpen, setBulkGroupModalOpen] = useState(false)
   const [pendingRemoveUserId, setPendingRemoveUserId] = useState<number | null>(null)
   const [saving, setSaving] = useState(false)
+  const [provisioning, setProvisioning] = useState<Set<number>>(() => new Set())
 
   const groupNameById = React.useMemo(() => {
     const map: Record<number, string> = {}
@@ -61,6 +62,43 @@ export const AdminUsersTab = () => {
       toastError(`Could not add user: ${err.message}`)
     } finally {
       setSaving(false)
+    }
+  }
+
+  const provisionNumber = async (userId: number) => {
+    setProvisioning(prev => { const n = new Set(prev); n.add(userId); return n })
+    try {
+      // Raw fetch — apiFetch loses the error code (data.error is a string like
+      // 'PHONE_LIMIT_REACHED', not an object with .message), and we need to
+      // distinguish codes for user-facing messaging.
+      const apiBase = import.meta.env.VITE_API_BASE_URL as string
+      const res = await fetch(`${apiBase}/users/${userId}/provision-number`, {
+        method:  'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        // Fastify rejects 'Content-Type: application/json' with an empty body.
+        // The endpoint takes no input — send {} so the parser is satisfied.
+        body: '{}',
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        if (data.error === 'PHONE_LIMIT_REACHED') {
+          toastError('No numbers available. Raise PHONE_MAX_NUMBERS.')
+        } else if (data.error === 'PROVISION_FAILED') {
+          toastError('Failed to assign. Try again.')
+        } else {
+          toastError(`Could not assign number: ${data.error || `Request failed ${res.status}`}`)
+        }
+        return
+      }
+      await refresh()
+      toastSuccess(`Phone number assigned: ${data.assignedPhone}`)
+    } catch (err: any) {
+      toastError(`Could not assign number: ${err.message}`)
+    } finally {
+      setProvisioning(prev => { const n = new Set(prev); n.delete(userId); return n })
     }
   }
 
@@ -232,16 +270,34 @@ export const AdminUsersTab = () => {
 
       {/* Table */}
       <div style={{ border: '1px solid var(--border)', borderRadius: 10, overflow: 'auto', maxHeight: 540 }}>
-        <div style={{ display: 'grid', gridTemplateColumns: '34px 1fr 1fr 100px 100px 80px 140px', minWidth: 780, gap: 8, padding: '10px 14px', borderBottom: '1px solid var(--border)', fontSize: 12, fontWeight: 600, color: 'var(--text-3)', background: 'var(--bg)', position: 'sticky', top: 0, zIndex: 2 }}>
-          <span>Select</span><span>Name</span><span>Email</span><span>Role</span><span>SMS (masked)</span><span>Groups</span><span>Actions</span>
+        <div style={{ display: 'grid', gridTemplateColumns: '34px 1fr 1fr 100px 100px 140px 80px 140px', minWidth: 920, gap: 8, padding: '10px 14px', borderBottom: '1px solid var(--border)', fontSize: 12, fontWeight: 600, color: 'var(--text-3)', background: 'var(--bg)', position: 'sticky', top: 0, zIndex: 2 }}>
+          <span>Select</span><span>Name</span><span>Email</span><span>Role</span><span>SMS (masked)</span><span>Phone #</span><span>Groups</span><span>Actions</span>
         </div>
         {sortedRows.map((r, idx) => (
-          <div key={r.id} style={{ display: 'grid', gridTemplateColumns: '34px 1fr 1fr 100px 100px 80px 140px', minWidth: 780, gap: 8, padding: density === 'compact' ? '8px 14px' : '12px 14px', borderBottom: '1px solid var(--border)', alignItems: 'center', fontSize: 14, background: idx % 2 ? 'var(--surface)' : 'oklch(99% 0.003 240)' }}>
+          <div key={r.id} style={{ display: 'grid', gridTemplateColumns: '34px 1fr 1fr 100px 100px 140px 80px 140px', minWidth: 920, gap: 8, padding: density === 'compact' ? '8px 14px' : '12px 14px', borderBottom: '1px solid var(--border)', alignItems: 'center', fontSize: 14, background: idx % 2 ? 'var(--surface)' : 'oklch(99% 0.003 240)' }}>
             <span><input type="checkbox" checked={selectedUserIds.has(r.id)} onChange={() => toggleSelectedUser(r.id)} /></span>
             <span title={r.name} style={{ fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{r.name}</span>
             <span title={r.email ?? ''} style={{ color: 'var(--text-2)', fontSize: 13, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{r.email}</span>
             <span>{r.role}</span>
             <span style={{ fontFamily: 'ui-monospace, monospace', fontSize: 12 }}>{maskPhone(r.phone)}</span>
+            <span style={{ fontSize: 12 }}>
+              {r.role === 'manager' ? (
+                r.assignedPhone ? (
+                  <span style={{ fontFamily: 'ui-monospace, monospace' }}>{r.assignedPhone}</span>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => provisionNumber(r.id)}
+                    disabled={provisioning.has(r.id)}
+                    style={{ fontSize: 12, fontWeight: 600, color: 'var(--primary)', border: '1px solid var(--primary)', background: 'var(--primary-light)', borderRadius: 6, padding: '4px 10px', opacity: provisioning.has(r.id) ? 0.5 : 1, cursor: provisioning.has(r.id) ? 'not-allowed' : 'pointer' }}
+                  >
+                    {provisioning.has(r.id) ? 'Assigning…' : 'Assign number'}
+                  </button>
+                )
+              ) : (
+                <span style={{ color: 'var(--text-3)' }}>—</span>
+              )}
+            </span>
             <span>
               <button type="button" onClick={() => setViewGroupsUserId(r.id)} style={{ fontSize: 12, fontWeight: 600, color: 'var(--primary)', border: '1px solid var(--primary)', background: 'var(--primary-light)', borderRadius: 6, padding: '4px 10px' }}>
                 View groups

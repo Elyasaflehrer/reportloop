@@ -2,11 +2,13 @@ export type UserRole = 'admin' | 'manager' | 'viewer' | 'participant';
 
 export interface Session {
   id: string;
+  userId: number | null;
   email: string;
   name: string;
   initials: string;
   role: UserRole;
   title: string;
+  assignedPhone: string | null;
   viewableManagers: { id: number; name: string; access: 'full' | 'own' }[];
   viewerManagerIds: number[];
   activeManagerId: number | null;
@@ -23,6 +25,7 @@ export interface User {
   role: UserRole;
   active: boolean;
   smsOptedOut?: boolean;
+  assignedPhone: string | null;
   createdAt: string;
   updatedAt: string;
   groups?: Group[];

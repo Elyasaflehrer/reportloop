@@ -11,6 +11,7 @@ interface SessionContextValue {
   login: (credentials: { email: string; password: string }) => Promise<void>
   logout: () => Promise<void>
   setViewerManager: (mid: number) => void
+  setAssignedPhone: (phone: string | null) => void
   refreshViewerSessionFromGroups: () => Promise<void>
   activeManagerId: number | null
   needsPasswordReset: boolean
@@ -29,11 +30,13 @@ export const useSession = () => {
 
 const mapSupabaseSession = (sb: { user: { id: string; email?: string; user_metadata?: Record<string, string>; }; access_token: string }): Session => ({
   id: sb.user.id,
+  userId: null,
   email: sb.user.email ?? '',
   name: sb.user.user_metadata?.name || sb.user.email || 'User',
   initials: ((sb.user.user_metadata?.name || sb.user.email || '??').slice(0, 2)).toUpperCase(),
   role: (sb.user.user_metadata?.role || 'viewer') as UserRole,
   title: sb.user.user_metadata?.title || '',
+  assignedPhone: null,
   viewableManagers: [],
   viewerManagerIds: [],
   activeManagerId: null,
@@ -58,8 +61,10 @@ export const SessionProvider = ({ children }: { children: React.ReactNode }) => 
         const { user, scope } = await res.json()
         setSession({
           ...base,
+          userId:           typeof user.id === 'number' ? user.id : null,
           role:             user.role,
           name:             user.name || base.name,
+          assignedPhone:    user.assignedPhone ?? null,
           viewableManagers: scope?.viewableManagers ?? [],
           viewerManagerIds: scope?.viewableManagerIds ?? [],
           activeManagerId:  (scope?.viewableManagerIds ?? [])[0] ?? null,
@@ -100,6 +105,10 @@ export const SessionProvider = ({ children }: { children: React.ReactNode }) => 
     setSession((cur) => cur ? { ...cur, activeManagerId: mid } : cur)
   }
 
+  const setAssignedPhone = (phone: string | null) => {
+    setSession((cur) => cur ? { ...cur, assignedPhone: phone } : cur)
+  }
+
   const refreshViewerSessionFromGroups = React.useCallback(async () => {
     if (!supabaseClient) return
     const { data: { session: sb } } = await supabaseClient.auth.getSession()
@@ -120,6 +129,7 @@ export const SessionProvider = ({ children }: { children: React.ReactNode }) => 
       login,
       logout,
       setViewerManager,
+      setAssignedPhone,
       refreshViewerSessionFromGroups,
       activeManagerId: session?.role === 'viewer' ? session.activeManagerId : null,
       needsPasswordReset,
