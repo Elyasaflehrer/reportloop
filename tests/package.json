@@ -1,0 +1,21 @@
+{
+  "name": "@reportloop/tests",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Backend HTTP-level tests. Runs against a separately-running backend dev server (real DB, real Redis, mocked or real Twilio depending on tier).",
+  "type": "module",
+  "scripts": {
+    "test":       "vitest run --project ci",
+    "test:watch": "vitest --project ci",
+    "test:e2e":   "vitest run --project e2e",
+    "test:all":   "vitest run"
+  },
+  "devDependencies": {
+    "@prisma/client": "^7.8.0",
+    "@types/node":    "^20.14.0",
+    "dotenv":         "^16.4.5",
+    "tsx":            "^4.21.0",
+    "typescript":     "^5.4.5",
+    "vitest":         "^1.6.0"
+  }
+}
