@@ -340,7 +340,8 @@ export async function usersRoutes(app: FastifyInstance, opts: { smsProvider: ISm
   })
 
   // ─── DELETE /users/:id ─────────────────────────────────────────────────────
-
+  // ---------------- TODO ----------------
+  // /users/:id --> /users/:id/delete
   app.delete('/users/:id', { preHandler: [authenticate, requireRole('admin')] }, async (req, reply) => {
     const { id } = req.params as { id: string }
     const userId = parseInt(id, 10)
@@ -358,6 +359,13 @@ export async function usersRoutes(app: FastifyInstance, opts: { smsProvider: ISm
       where: { id: userId },
       data:  { active: false, deletedAt: new Date() },
     })
+
+    // ---------------- TODO ----------------
+    // Revoke active sessions (refresh tokens) at Supabase
+    // if (existing.supabaseId) {
+    //   await supabaseAdmin.auth.admin.signOut(existing.supabaseId)
+    //     .catch(err => req.log.warn({ err, userId }, '[users] supabase signOut failed'))
+    // }
 
     return reply.status(204).send()
   })
