@@ -2,7 +2,7 @@ import { z } from 'zod'
 
 const schema = z.object({
   node_env:  z.enum(['development', 'production', 'test']).default('development'),
-  log_level: z.enum(['debug', 'info', 'warn', 'error']).default('info'),
+  log_level: z.enum(['debug', 'info', 'warn', 'error' , 'silent']).default('info'),
 
   app: z.object({
     port:           z.coerce.number().default(3000),

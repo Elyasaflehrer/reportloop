@@ -19,7 +19,7 @@ import type { ISmsProvider } from './services/sms/sms.provider.interface.js'
 export async function buildApp(): Promise<FastifyInstance> {
   const app = Fastify({
     logger: {
-      level: config.node_env === 'test' ? 'silent' : config.log_level,
+      level: config.log_level,
       ...(config.node_env === 'development' && {
         transport: { target: 'pino-pretty', options: { colorize: true, singleLine: true } },
       }),
