@@ -1,11 +1,14 @@
 import cron from 'node-cron'
+import cronstrue from 'cronstrue';
+
 import { DateTime } from 'luxon'
 import { prisma } from '../db.js'
 import { config } from '../config.js'
 import type { ISmsProvider } from '../services/sms/sms.provider.interface.js'
 
 export function startReminderWorker(smsProvider: ISmsProvider) {
-  const task = cron.schedule(config.node_env === 'test' ? null as any : '*/15 * * * *', async () => {
+  const reminderWorkerCron = config.reminderWorker.cron
+  const task = cron.schedule(reminderWorkerCron, async () => {
     try {
       await runReminderLadder(smsProvider)
       await runStuckRecovery()
@@ -14,7 +17,8 @@ export function startReminderWorker(smsProvider: ISmsProvider) {
     }
   })
 
-  console.info('[reminder-worker] started — running every 15 minutes')
+  const reminderWorkerHuman = cronstrue.toString(reminderWorkerCron);
+  console.info('[reminder-worker] started — running every', reminderWorkerHuman)
   return task
 }
 

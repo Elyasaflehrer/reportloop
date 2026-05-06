@@ -69,6 +69,10 @@ const schema = z.object({
     concurrency: z.coerce.number().int().min(1).max(50).default(5),
   }),
 
+  reminderWorker: z.object({
+    cron: z.string().min(1).default('*/15 * * * *'),
+  }),
+
   rateLimits: z.object({
     globalMax: z.coerce.number().default(100),
     fireMax:   z.coerce.number().default(5),
@@ -144,6 +148,10 @@ export const config = schema.parse({
 
   inboundWorker: {
     concurrency: process.env.INBOUND_WORKER_CONCURRENCY,
+  },
+
+  reminderWorker: {
+    cron: process.env.REMINDER_WORKER_CRON,
   },
 
   rateLimits: {
