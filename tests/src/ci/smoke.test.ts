@@ -5,7 +5,7 @@
 // Backend must be running separately (cd backend && npm run dev).
 
 import { describe, it, expect } from 'vitest'
-import { get, post, del } from '../helpers/api.ts'
+import { get, post, del } from '../helpers/api'
 
 describe('Smoke — backend reachable, auth gates work', () => {
   it('GET /auth/me without token → 401', async () => {

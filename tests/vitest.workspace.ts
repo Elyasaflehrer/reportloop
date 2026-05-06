@@ -13,6 +13,7 @@ export default defineWorkspace([
       name: 'ci',
       include: ['src/ci/**/*.test.ts'],
       environment: 'node',
+      setupFiles: ['./src/helpers/setup-env.ts'],
       // Each test does real HTTP + DB cleanup; 10s is generous for CI scenarios.
       testTimeout: 10_000,
     },
@@ -22,6 +23,7 @@ export default defineWorkspace([
       name: 'e2e',
       include: ['src/e2e/**/*.test.ts'],
       environment: 'node',
+      setupFiles: ['./src/helpers/setup-env.ts'],
       // E2E waits for real Twilio delivery (1–30s) + AI processing (2–5s).
       testTimeout: 120_000,
     },

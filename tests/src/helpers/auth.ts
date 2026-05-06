@@ -1,7 +1,6 @@
 // Mints Supabase-shaped JWTs locally using SUPABASE_JWT_SECRET. Used by tests
 // to authenticate as arbitrary roles without going through Supabase's login
 // flow. The backend's auth middleware verifies these the same as real ones.
-
 import crypto from 'node:crypto'
 
 const SECRET = process.env.SUPABASE_JWT_SECRET
@@ -17,7 +16,7 @@ const base64url = (input: string): string =>
 
 export function signTestToken(opts: {
   supabaseId:        string
-  email?:            string
+  email:            string | null
   expiresInSeconds?: number
 }): string {
   const now = Math.floor(Date.now() / 1000)
