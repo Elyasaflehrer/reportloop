@@ -1,0 +1,53 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+
+  
+    
+    {
+      "name": "Debug Backend Test (WSL)",
+      "type": "pwa-node",
+      "request": "launch",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev"],
+      "cwd": "${workspaceFolder}/backend",
+      "env": {"NODE_ENV": "test"},
+      "envFile": "${workspaceFolder}/backend/.env.test",
+      "console": "integratedTerminal",
+      "internalConsoleOptions": "neverOpen"
+    },
+    {
+      "name": "Debug: Dev Server",
+      "type": "node",
+      "request": "launch",
+      "runtimeExecutable": "${workspaceFolder}/backend/node_modules/.bin/tsx",
+      "args": ["watch", "${workspaceFolder}/backend/src/index.ts"],
+      "cwd": "${workspaceFolder}/backend",
+      "envFile": "${workspaceFolder}/backend/.env",
+      "sourceMaps": true,
+      "console": "integratedTerminal"
+    },
+    {
+      "name": "Test: Provision Service",
+      "type": "node",
+      "request": "launch",
+      "runtimeExecutable": "${workspaceFolder}/backend/node_modules/.bin/tsx",
+      "args": ["${workspaceFolder}/backend/scripts/tests/test-provision-service.ts"],
+      "cwd": "${workspaceFolder}/backend",
+      "envFile": "${workspaceFolder}/backend/.env",
+      "sourceMaps": true,
+      "console": "integratedTerminal"
+    },
+    {
+      "name": "Test: Provision Number",
+      "type": "node",
+      "request": "launch",
+      "runtimeExecutable": "${workspaceFolder}/backend/node_modules/.bin/tsx",
+      "args": ["${workspaceFolder}/backend/scripts/tests/test-provision.ts"],
+      "cwd": "${workspaceFolder}/backend",
+      "envFile": "${workspaceFolder}/backend/.env",
+      "sourceMaps": true,
+      "console": "integratedTerminal"
+    }
+  ]
+}
