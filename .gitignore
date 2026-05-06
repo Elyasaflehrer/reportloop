@@ -530,3 +530,10 @@ dist
 .svelte-kit
 
 # End of https://www.toptal.com/developers/gitignore/api/node
+
+# Root-level package files exist only as a host for the supabase CLI
+# devDep (installed by `just setup-deps`). The repo isn't a Node project
+# at the root — backend/ and tests/ are. Leading slash anchors to root
+# so subdir package.json files stay tracked.
+/package.json
+/package-lock.json
