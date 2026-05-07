@@ -113,6 +113,27 @@ The other ~169 scenarios from the 184 list are **Tier 1 (CI) only**.
 
 ---
 
+## Cost tag — what runs now vs later
+
+Independent of the CI/E2E tier split, every scenario gets a **cost** tag that
+controls whether we run it today.
+
+| Tag | Meaning | Run now? |
+|---|---|---|
+| `free` | Hits only local services (Postgres, Redis, Supabase local). No external paid API. | ✅ yes |
+| `mock-pending` | Would call real Twilio today; cheap to unlock once the `ISmsProvider` mock is wired. | ❌ defer — but unblock by building the mock |
+| `real-only` | Fundamentally needs real Twilio (Tier 2 E2E only). | ❌ defer to release-gate runs |
+
+**Rule:** only `free` scenarios run on every commit until the Twilio mock is in.
+The `mock-pending` count is the backlog the mock will unlock — watch it as a
+signal of how much value building the mock buys.
+
+Each scenario below has its tag appended in italics, e.g.:
+- [ ] **1.2** Create manager user — triggers phone provisioning  *(mock-pending)*
+- [ ] **1.3** Create viewer user  *(free)*
+
+---
+
 ## Code organization
 
 ```
@@ -217,129 +238,129 @@ different setup files, different timeouts.
 
 ## 1. User CRUD
 
-- [ ] **1.1** Create admin user
-- [ ] **1.2** Create manager user — triggers phone provisioning (`onManagerCreated`)
-- [ ] **1.3** Create viewer user
-- [ ] **1.4** Create participant user (no email, phone only)
-- [ ] **1.5** Create with missing required field → 400
-- [ ] **1.6** Create with duplicate email → 409
-- [ ] **1.7** Create with duplicate phone → 409
-- [ ] **1.8** Create with malformed email → 400
-- [ ] **1.9** Create with malformed phone (non-E.164) → 400
-- [ ] **1.10** Create user — non-admin caller → 403
-- [ ] **1.11** List users (`GET /users`) — admin sees all
-- [ ] **1.12** List users — manager sees only their group members  *needs verification*
-- [ ] **1.13** List users — viewer sees only viewable managers' members  *needs verification*
-- [ ] **1.14** Get user by id (`GET /users/:id`) — happy path
-- [ ] **1.15** Get user — non-admin requesting another user → 403
-- [ ] **1.16** Update user name/email/phone (no role change)
-- [ ] **1.17** Update user — non-admin updating someone else → 403
-- [ ] **1.18** Update user with duplicate email (different user) → 409
-- [ ] **1.19** Update user with duplicate phone (different user) → 409
-- [ ] **1.20** Update user — email change triggers Supabase metadata sync
-- [ ] **1.21** Soft-delete user (DELETE /users/:id)
-- [ ] **1.22** Soft-delete then list → not returned
-- [ ] **1.23** Soft-delete a manager → assignedPhone stays on the soft-deleted record
-- [ ] **1.24** Cannot delete self  *needs verification*
-- [ ] **1.25** Cannot demote sole remaining admin  *needs verification — open question whether enforced*
+- [ ] **1.1** Create admin user  *(free)*
+- [ ] **1.2** Create manager user — triggers phone provisioning (`onManagerCreated`)  *(mock-pending)*
+- [x] **1.3** Create viewer user  *(free)*
+- [x] **1.4** Create participant user (no email, phone only)  *(free)*
+- [x] **1.5** Create with missing required field → 400  *(free)*
+- [x] **1.6** Create with duplicate email → 409  *(free)*
+- [x] **1.7** Create with duplicate phone → 409  *(free)*
+- [x] **1.8** Create with malformed email → 400  *(free)*
+- [x] **1.9** Create with malformed phone (non-E.164) → 400  *(free)*
+- [x] **1.10** Create user — non-admin caller → 403  *(free)*
+- [ ] **1.11** List users (`GET /users`) — admin sees all  *(free)*
+- [ ] **1.12** List users — manager sees only their group members  *needs verification*  *(free)*
+- [ ] **1.13** List users — viewer sees only viewable managers' members  *needs verification*  *(free)*
+- [ ] **1.14** Get user by id (`GET /users/:id`) — happy path  *(free)*
+- [ ] **1.15** Get user — non-admin requesting another user → 403  *(free)*
+- [ ] **1.16** Update user name/email/phone (no role change)  *(free)*
+- [ ] **1.17** Update user — non-admin updating someone else → 403  *(free)*
+- [ ] **1.18** Update user with duplicate email (different user) → 409  *(free)*
+- [ ] **1.19** Update user with duplicate phone (different user) → 409  *(free)*
+- [ ] **1.20** Update user — email change triggers Supabase metadata sync  *(free)*
+- [ ] **1.21** Soft-delete user (DELETE /users/:id)  *(free)*
+- [ ] **1.22** Soft-delete then list → not returned  *(free)*
+- [ ] **1.23** Soft-delete a manager → assignedPhone stays on the soft-deleted record  *(mock-pending)*
+- [ ] **1.24** Cannot delete self  *needs verification*  *(free)*
+- [ ] **1.25** Cannot demote sole remaining admin  *needs verification — open question whether enforced*  *(free)*
 
 ---
 
 ## 2. Role transitions
 
-- [ ] **2.1** viewer → manager → triggers provisioning, gets number
-- [ ] **2.2** viewer → admin
-- [ ] **2.3** manager → viewer → demotion cleanup (schedules + questions soft-deleted, ManagerGroup links removed, assignedPhone stays)
-- [ ] **2.4** manager → admin → demotion cleanup runs
-- [ ] **2.5** Demote then re-promote → reclaims own assignedPhone (Step 1 of provisioning), no Twilio call
-- [ ] **2.6** Promote viewer to manager when at PHONE_LIMIT_REACHED → manager created with no number, warning logged (does NOT throw)
-- [ ] **2.7** Concurrent role-change attempts → last write wins
-- [ ] **2.8** participant → manager — *open question: is this transition allowed?*
-- [ ] **2.9** admin → viewer
-- [ ] **2.10** admin → manager → triggers provisioning
-- [ ] **2.11** Provisioning fires for both POST `/users` create-as-manager AND PATCH role-to-manager paths
+- [ ] **2.1** viewer → manager → triggers provisioning, gets number  *(mock-pending)*
+- [ ] **2.2** viewer → admin  *(free)*
+- [ ] **2.3** manager → viewer → demotion cleanup (schedules + questions soft-deleted, ManagerGroup links removed, assignedPhone stays)  *(mock-pending)*
+- [ ] **2.4** manager → admin → demotion cleanup runs  *(mock-pending)*
+- [ ] **2.5** Demote then re-promote → reclaims own assignedPhone (Step 1 of provisioning), no Twilio call  *(mock-pending)*
+- [ ] **2.6** Promote viewer to manager when at PHONE_LIMIT_REACHED → manager created with no number, warning logged (does NOT throw)  *(mock-pending)*
+- [ ] **2.7** Concurrent role-change attempts → last write wins  *(mock-pending)*
+- [ ] **2.8** participant → manager — *open question: is this transition allowed?*  *(mock-pending)*
+- [ ] **2.9** admin → viewer  *(free)*
+- [ ] **2.10** admin → manager → triggers provisioning  *(mock-pending)*
+- [ ] **2.11** Provisioning fires for both POST `/users` create-as-manager AND PATCH role-to-manager paths  *(mock-pending)*
 
 ---
 
 ## 3. Phone provisioning
 
-- [ ] **3.1** First manager creation → Twilio API called, number bought
-- [ ] **3.2** Second manager, no idle numbers → Twilio API called again
-- [ ] **3.3** New manager when an idle number exists → number recycled, no Twilio call
-- [ ] **3.4** Manager re-promoted → reclaims their own number (Step 1, no Twilio)
-- [ ] **3.5** Hit PHONE_MAX_NUMBERS → 429 PHONE_LIMIT_REACHED
-- [ ] **3.6** Twilio API fails (network / auth error) → 502 PROVISION_FAILED
-- [ ] **3.7** Concurrent provisioning of same idle number → only one wins (transaction), second falls through
-- [ ] **3.8** Manual `POST /users/:id/provision-number` — admin for any manager → success
-- [ ] **3.9** Manual provision — manager for self → success
-- [ ] **3.10** Manual provision — manager for another manager → 403
-- [ ] **3.11** Manual provision — viewer for any → 403
-- [ ] **3.12** Manual provision — target user is not a manager → 400
+- [ ] **3.1** First manager creation → Twilio API called, number bought  *(mock-pending)*
+- [ ] **3.2** Second manager, no idle numbers → Twilio API called again  *(mock-pending)*
+- [ ] **3.3** New manager when an idle number exists → number recycled, no Twilio call  *(mock-pending)*
+- [ ] **3.4** Manager re-promoted → reclaims their own number (Step 1, no Twilio)  *(mock-pending)*
+- [ ] **3.5** Hit PHONE_MAX_NUMBERS → 429 PHONE_LIMIT_REACHED  *(mock-pending)*
+- [ ] **3.6** Twilio API fails (network / auth error) → 502 PROVISION_FAILED  *(mock-pending)*
+- [ ] **3.7** Concurrent provisioning of same idle number → only one wins (transaction), second falls through  *(mock-pending)*
+- [ ] **3.8** Manual `POST /users/:id/provision-number` — admin for any manager → success  *(mock-pending)*
+- [ ] **3.9** Manual provision — manager for self → success  *(mock-pending)*
+- [ ] **3.10** Manual provision — manager for another manager → 403  *(free)*
+- [ ] **3.11** Manual provision — viewer for any → 403  *(free)*
+- [ ] **3.12** Manual provision — target user is not a manager → 400  *(free)*
 
 ---
 
 ## 4. Schedule lifecycle
 
-- [ ] **4.1** Create schedule for manager with phone → active OK
-- [ ] **4.2** Create with `active: true` for manager without phone → forced `active: false` + `warning: 'PHONE_NUMBER_REQUIRED'`
-- [ ] **4.3** Activate via PATCH for manager without phone → 422 PHONE_NUMBER_REQUIRED
-- [ ] **4.4** Activate via PATCH for manager with phone → succeeds
-- [ ] **4.5** Update non-active fields (label, time, etc.)
-- [ ] **4.6** Soft-delete schedule
-- [ ] **4.7** Soft-deleted schedule → broadcasts don't fire, doesn't appear in cron lookup
-- [ ] **4.8** Schedule references soft-deleted question — *open question: filter excluded?*
-- [ ] **4.9** `GET /schedules` — admin sees all
-- [ ] **4.10** `GET /schedules` — manager sees only own
-- [ ] **4.11** `GET /schedules` — viewer sees viewable managers' schedules
-- [ ] **4.12** `GET /schedules/:id` — happy path
-- [ ] **4.13** `GET /schedules/:id` — RBAC violations → 403
-- [ ] **4.14** Create schedule with invalid timezone → 400
-- [ ] **4.15** Create schedule with invalid dayOfWeek → 400
-- [ ] **4.16** Create schedule with no scheduleRecipients (recipientMode: 'subset') — *open question: validation?*
-- [ ] **4.17** Create schedule with no scheduleQuestions — *open question: validation?*
-- [ ] **4.18** Attach scheduleRecipient (subset mode) → only those participants targeted
-- [ ] **4.19** Attach scheduleQuestion → broadcast sends those questions
+- [ ] **4.1** Create schedule for manager with phone → active OK  *(mock-pending)*
+- [ ] **4.2** Create with `active: true` for manager without phone → forced `active: false` + `warning: 'PHONE_NUMBER_REQUIRED'`  *(mock-pending)*
+- [ ] **4.3** Activate via PATCH for manager without phone → 422 PHONE_NUMBER_REQUIRED  *(mock-pending)*
+- [ ] **4.4** Activate via PATCH for manager with phone → succeeds  *(mock-pending)*
+- [ ] **4.5** Update non-active fields (label, time, etc.)  *(mock-pending)*
+- [ ] **4.6** Soft-delete schedule  *(mock-pending)*
+- [ ] **4.7** Soft-deleted schedule → broadcasts don't fire, doesn't appear in cron lookup  *(mock-pending)*
+- [ ] **4.8** Schedule references soft-deleted question — *open question: filter excluded?*  *(mock-pending)*
+- [ ] **4.9** `GET /schedules` — admin sees all  *(mock-pending)*
+- [ ] **4.10** `GET /schedules` — manager sees only own  *(mock-pending)*
+- [ ] **4.11** `GET /schedules` — viewer sees viewable managers' schedules  *(mock-pending)*
+- [ ] **4.12** `GET /schedules/:id` — happy path  *(mock-pending)*
+- [ ] **4.13** `GET /schedules/:id` — RBAC violations → 403  *(mock-pending)*
+- [ ] **4.14** Create schedule with invalid timezone → 400  *(free)*
+- [ ] **4.15** Create schedule with invalid dayOfWeek → 400  *(free)*
+- [ ] **4.16** Create schedule with no scheduleRecipients (recipientMode: 'subset') — *open question: validation?*  *(free — assumes body-schema validation runs before manager lookup)*
+- [ ] **4.17** Create schedule with no scheduleQuestions — *open question: validation?*  *(free — same caveat)*
+- [ ] **4.18** Attach scheduleRecipient (subset mode) → only those participants targeted  *(mock-pending)*
+- [ ] **4.19** Attach scheduleQuestion → broadcast sends those questions  *(mock-pending)*
 
 ---
 
 ## 5. Broadcast lifecycle
 
-- [ ] **5.1** Manual trigger by admin → fires, conversations created
-- [ ] **5.2** Manual trigger by manager (own schedule) → fires
-- [ ] **5.3** Manual trigger by manager (other's schedule) → 403
-- [ ] **5.4** Schedule cron fires at scheduled time → broadcast queued
-- [ ] **5.5** Broadcast for manager with no `assignedPhone` → blocked at guard, error logged, no SMS sent
-- [ ] **5.6** Broadcast skips opted-out participants
-- [ ] **5.7** Broadcast skips participants with no phone
-- [ ] **5.8** Two managers, same participant → both conversations created, no cross-routing on reply
-- [ ] **5.9** Broadcast with `recipientMode: 'all'` → all group members targeted
-- [ ] **5.10** Broadcast with `recipientMode: 'subset'` → only ScheduleRecipient rows targeted
-- [ ] **5.11** Broadcast deduplication — same scheduleId + fireDate → uniqueness constraint
-- [ ] **5.12** Broadcast retry on transient SMS failure (BullMQ retries)
-- [ ] **5.13** `triggeredBy` field set correctly on manual trigger; null on cron-fired
-- [ ] **5.14** `GET /broadcasts` list — *open question: in v1.2 or deferred?*
+- [ ] **5.1** Manual trigger by admin → fires, conversations created  *(mock-pending)*
+- [ ] **5.2** Manual trigger by manager (own schedule) → fires  *(mock-pending)*
+- [ ] **5.3** Manual trigger by manager (other's schedule) → 403  *(mock-pending)*
+- [ ] **5.4** Schedule cron fires at scheduled time → broadcast queued  *(mock-pending)*
+- [ ] **5.5** Broadcast for manager with no `assignedPhone` → blocked at guard, error logged, no SMS sent  *(mock-pending)*
+- [ ] **5.6** Broadcast skips opted-out participants  *(mock-pending)*
+- [ ] **5.7** Broadcast skips participants with no phone  *(mock-pending)*
+- [ ] **5.8** Two managers, same participant → both conversations created, no cross-routing on reply  *(mock-pending)*
+- [ ] **5.9** Broadcast with `recipientMode: 'all'` → all group members targeted  *(mock-pending)*
+- [ ] **5.10** Broadcast with `recipientMode: 'subset'` → only ScheduleRecipient rows targeted  *(mock-pending)*
+- [ ] **5.11** Broadcast deduplication — same scheduleId + fireDate → uniqueness constraint  *(mock-pending)*
+- [ ] **5.12** Broadcast retry on transient SMS failure (BullMQ retries)  *(mock-pending)*
+- [ ] **5.13** `triggeredBy` field set correctly on manual trigger; null on cron-fired  *(mock-pending)*
+- [ ] **5.14** `GET /broadcasts` list — *open question: in v1.2 or deferred?*  *(cost-tag pending — depends on endpoint existence; if read-only list it's `free`)*
 
 ---
 
 ## 6. Inbound webhook — message handling (Step 16)
 
-- [ ] **6.1** Happy path — participant replies → message saved, conversation locked, conversationQueue enqueued
-- [ ] **6.2** Empty body → log.debug + return
-- [ ] **6.3** Whitespace-only body → log.debug + return
-- [ ] **6.4** Duplicate Twilio SID (Layer 2 idempotency) → log.warn + return
-- [ ] **6.5** Unknown participant → audit log UNKNOWN_PARTICIPANT, includes `toPhone`
-- [ ] **6.6** Opted-out participant sends regular message → log.info + return, no DB write
-- [ ] **6.7** Unknown manager number → log.info + return
-- [ ] **6.8** Manager soft-deleted but number still active → log.info + return
-- [ ] **6.9** No open conversation for participant + manager → log.warn + return
-- [ ] **6.10** Out-of-turn (status: processing) → audit log `OUT_OF_TURN`
-- [ ] **6.11** Out-of-turn (status: completed) → audit log `SESSION_COMPLETED`
-- [ ] **6.12** Out-of-turn (status: timed_out) → audit log `SESSION_TIMED_OUT`
-- [ ] **6.13** Out-of-turn (status: failed) → audit log `SESSION_FAILED`
-- [ ] **6.14** Out-of-turn (status: superseded) → audit log `SESSION_SUPERSEDED`
-- [ ] **6.15** Body too long (P2000) → log.warn + return, no retry
-- [ ] **6.16** Manager A demoted, number reassigned to Manager B, participant replies → falls to "no open conversation"
-- [ ] **6.17** Concurrent replies to same conversation → only one acquires lock, other audited as OUT_OF_TURN
+- [ ] **6.1** Happy path — participant replies → message saved, conversation locked, conversationQueue enqueued  *(mock-pending)*
+- [ ] **6.2** Empty body → log.debug + return  *(free)*
+- [ ] **6.3** Whitespace-only body → log.debug + return  *(free)*
+- [ ] **6.4** Duplicate Twilio SID (Layer 2 idempotency) → log.warn + return  *(mock-pending)*
+- [ ] **6.5** Unknown participant → audit log UNKNOWN_PARTICIPANT, includes `toPhone`  *(free)*
+- [ ] **6.6** Opted-out participant sends regular message → log.info + return, no DB write  *(free)*
+- [ ] **6.7** Unknown manager number → log.info + return  *(free)*
+- [ ] **6.8** Manager soft-deleted but number still active → log.info + return  *(mock-pending)*
+- [ ] **6.9** No open conversation for participant + manager → log.warn + return  *(mock-pending)*
+- [ ] **6.10** Out-of-turn (status: processing) → audit log `OUT_OF_TURN`  *(mock-pending)*
+- [ ] **6.11** Out-of-turn (status: completed) → audit log `SESSION_COMPLETED`  *(mock-pending)*
+- [ ] **6.12** Out-of-turn (status: timed_out) → audit log `SESSION_TIMED_OUT`  *(mock-pending)*
+- [ ] **6.13** Out-of-turn (status: failed) → audit log `SESSION_FAILED`  *(mock-pending)*
+- [ ] **6.14** Out-of-turn (status: superseded) → audit log `SESSION_SUPERSEDED`  *(mock-pending)*
+- [ ] **6.15** Body too long (P2000) → log.warn + return, no retry  *(mock-pending)*
+- [ ] **6.16** Manager A demoted, number reassigned to Manager B, participant replies → falls to "no open conversation"  *(mock-pending)*
+- [ ] **6.17** Concurrent replies to same conversation → only one acquires lock, other audited as OUT_OF_TURN  *(mock-pending)*
 
 ---
 
@@ -483,7 +504,7 @@ different setup files, different timeouts.
 
 | Category | Total | Passing | In progress | Not started |
 |---|---|---|---|---|
-| 1. User CRUD | 25 | 0 | 0 | 25 |
+| 1. User CRUD | 25 | 8 | 0 | 17 |
 | 2. Role transitions | 11 | 0 | 0 | 11 |
 | 3. Phone provisioning | 12 | 0 | 0 | 12 |
 | 4. Schedule lifecycle | 19 | 0 | 0 | 19 |
@@ -499,7 +520,7 @@ different setup files, different timeouts.
 | 14. Conversation reads | 8 | 0 | 0 | 8 |
 | 15. Auth flows | 7 | 0 | 0 | 7 |
 | 16. Health / observability | 4 | 0 | 0 | 4 |
-| **Total** | **184** | **0** | **0** | **184** |
+| **Total** | **184** | **8** | **0** | **176** |
 
 ---
 
