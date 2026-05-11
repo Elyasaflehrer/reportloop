@@ -93,23 +93,9 @@ These are the **release-gate scenarios** running with everything real.
 Hand-picked to cover the major flows; not a copy of the 184. If this set ever
 grows past ~25, we've drifted off-strategy.
 
-- [ ] **E2E.1** Provision a real Twilio number for a manager (real purchase via Twilio API)
-- [ ] **E2E.2** Re-promote a demoted manager → reclaims own number, no Twilio call
-- [ ] **E2E.3** Hit `PHONE_LIMIT_REACHED` with a low cap — UI shows correct error
-- [ ] **E2E.4** Activate schedule → fire broadcast → real SMS delivered to participant phone
-- [ ] **E2E.5** Manager has no number → broadcast blocked, no SMS sent
-- [ ] **E2E.6** Real participant reply → message saved, AI processes, conversation completes
-- [ ] **E2E.7** Real `STOP` keyword → opt-out + active conversations failed (verify in real DB)
-- [ ] **E2E.8** Real `START` keyword → opted back in
-- [ ] **E2E.9** Reminder cron sends real follow-up SMS to a stale conversation
-- [ ] **E2E.10** Real status callback for failed delivery (use known-bad number) → conversation marked `failed`
-- [ ] **E2E.11** Two managers + one participant → both broadcasts deliver, replies route correctly
-- [ ] **E2E.12** Out-of-turn reply (text twice quickly) → second reply audited as `OUT_OF_TURN`
-- [ ] **E2E.13** Real MMS rejected at gate (send actual MMS via real device)
-- [ ] **E2E.14** Webhook signature validation against real Twilio signature
-- [ ] **E2E.15** Full lifecycle: broadcast → reply → AI processing → completion → delivery callback
-
-The other ~169 scenarios from the 184 list are **Tier 1 (CI) only**.
+The actual list lives in the **"Real-cost queue"** section below — the single
+gathered place for every test that costs real Twilio money. The other ~169
+scenarios from the 184 list are **Tier 1 (CI) only**.
 
 ---
 
@@ -131,6 +117,126 @@ signal of how much value building the mock buys.
 Each scenario below has its tag appended in italics, e.g.:
 - [ ] **1.2** Create manager user — triggers phone provisioning  *(mock-pending)*
 - [ ] **1.3** Create viewer user  *(free)*
+
+---
+
+## Mock-backed queue — test before continuing
+
+The scenarios below are the ones that previously would have cost real Twilio
+money to run (each manager creation buys a number; each broadcast sends paid
+SMS). The `ISmsProvider` mock (see `backend/docs/mock-sms-provider.md`)
+removes that cost — every entry here can now run in CI for $0.
+
+This is the focused next batch: get these green before moving on to other
+work. The list is exactly the `mock-pending` set — no `free` (those already
+run today) and no `real-only` (those stay in Tier 2 / E2E).
+
+### Cat 1 — User CRUD
+- [x] **1.2** Create manager user — triggers phone provisioning
+- [x] **1.23** Soft-delete a manager → `assignedPhone` stays on the soft-deleted record
+
+### Cat 2 — Role transitions
+- [x] **2.1** viewer → manager → triggers provisioning, gets number
+- [ ] **2.3** manager → viewer → demotion cleanup (schedules + questions soft-deleted, ManagerGroup links removed, `assignedPhone` stays)
+- [ ] **2.4** manager → admin → demotion cleanup runs
+- [x] **2.5** Demote then re-promote → reclaims own `assignedPhone` (Step 1 of provisioning), no provider call
+- [ ] **2.6** Promote viewer to manager when at `PHONE_LIMIT_REACHED` → manager created with no number, warning logged (does NOT throw)
+- [ ] **2.7** Concurrent role-change attempts → last write wins
+- [ ] **2.8** participant → manager (open question: is this transition allowed?)
+- [ ] **2.10** admin → manager → triggers provisioning
+- [ ] **2.11** Provisioning fires for both `POST /users` create-as-manager AND `PATCH` role-to-manager paths
+
+### Cat 3 — Phone provisioning
+- [ ] **3.1** First manager creation → provider API called, number bought
+- [ ] **3.2** Second manager, no idle numbers → provider API called again
+- [x] **3.3** New manager when an idle number exists → number recycled, no provider call
+- [ ] **3.4** Manager re-promoted → reclaims their own number (Step 1, no provider call)
+- [x] **3.5** Hit `PHONE_MAX_NUMBERS` → 409 `PHONE_LIMIT_REACHED`
+- [ ] **3.6** Provider API fails (network / auth error) → 502 `PROVISION_FAILED`
+- [ ] **3.7** Concurrent provisioning of same idle number → only one wins (transaction), second falls through
+- [ ] **3.8** Manual `POST /users/:id/provision-number` — admin for any manager → success
+- [ ] **3.9** Manual provision — manager for self → success
+
+### Cat 4 — Schedule lifecycle
+- [ ] **4.1** Create schedule for manager with phone → active OK
+- [ ] **4.2** Create with `active: true` for manager without phone → forced `active: false` + `warning: 'PHONE_NUMBER_REQUIRED'`
+- [ ] **4.3** Activate via PATCH for manager without phone → 422 `PHONE_NUMBER_REQUIRED`
+- [ ] **4.4** Activate via PATCH for manager with phone → succeeds
+- [ ] **4.5** Update non-active fields (label, time, etc.)
+- [ ] **4.6** Soft-delete schedule
+- [ ] **4.7** Soft-deleted schedule → broadcasts don't fire, doesn't appear in cron lookup
+- [ ] **4.8** Schedule references soft-deleted question (open question: filter excluded?)
+- [ ] **4.9** `GET /schedules` — admin sees all
+- [ ] **4.10** `GET /schedules` — manager sees only own
+- [ ] **4.11** `GET /schedules` — viewer sees viewable managers' schedules
+- [ ] **4.12** `GET /schedules/:id` — happy path
+- [ ] **4.13** `GET /schedules/:id` — RBAC violations → 403
+- [ ] **4.18** Attach `scheduleRecipient` (subset mode) → only those participants targeted
+- [ ] **4.19** Attach `scheduleQuestion` → broadcast sends those questions
+
+### Cat 5 — Broadcast lifecycle
+- [ ] **5.1** Manual trigger by admin → fires, conversations created
+- [ ] **5.2** Manual trigger by manager (own schedule) → fires
+- [ ] **5.3** Manual trigger by manager (other's schedule) → 403
+- [ ] **5.4** Schedule cron fires at scheduled time → broadcast queued
+- [ ] **5.5** Broadcast for manager with no `assignedPhone` → blocked at guard, error logged, no SMS sent
+- [ ] **5.6** Broadcast skips opted-out participants
+- [ ] **5.7** Broadcast skips participants with no phone
+- [ ] **5.8** Two managers, same participant → both conversations created, no cross-routing on reply
+- [ ] **5.9** Broadcast with `recipientMode: 'all'` → all group members targeted
+- [ ] **5.10** Broadcast with `recipientMode: 'subset'` → only `ScheduleRecipient` rows targeted
+- [ ] **5.11** Broadcast deduplication — same `scheduleId` + `fireDate` → uniqueness constraint
+- [ ] **5.12** Broadcast retry on transient SMS failure (BullMQ retries)
+- [ ] **5.13** `triggeredBy` field set correctly on manual trigger; null on cron-fired
+
+### Cat 6 — Inbound webhook (message handling)
+- [ ] **6.1** Happy path — participant replies → message saved, conversation locked, `conversationQueue` enqueued
+- [ ] **6.4** Duplicate Twilio SID (Layer 2 idempotency) → log.warn + return
+- [ ] **6.8** Manager soft-deleted but number still active → log.info + return
+- [ ] **6.9** No open conversation for participant + manager → log.warn + return
+- [ ] **6.10** Out-of-turn (status: processing) → audit log `OUT_OF_TURN`
+- [ ] **6.11** Out-of-turn (status: completed) → audit log `SESSION_COMPLETED`
+- [ ] **6.12** Out-of-turn (status: timed_out) → audit log `SESSION_TIMED_OUT`
+- [ ] **6.13** Out-of-turn (status: failed) → audit log `SESSION_FAILED`
+- [ ] **6.14** Out-of-turn (status: superseded) → audit log `SESSION_SUPERSEDED`
+- [ ] **6.15** Body too long (P2000) → log.warn + return, no retry
+- [ ] **6.16** Manager A demoted, number reassigned to Manager B, participant replies → falls to "no open conversation"
+- [ ] **6.17** Concurrent replies to same conversation → only one acquires lock, other audited as `OUT_OF_TURN`
+
+**Total: 60 scenarios** (Cat 1: 2, Cat 2: 9, Cat 3: 9, Cat 4: 15, Cat 5: 13, Cat 6: 12)
+
+---
+
+## Real-cost queue — tests that still cost real money
+
+The scenarios below are the **only** tests in the suite that still cost real
+money to run — they fundamentally need real Twilio (real number purchase,
+real SMS sent, real webhooks fired by Twilio's servers). Everything else
+runs free against the mock or local services.
+
+Run this queue **only before a production release**, not on every commit.
+Cost is ~$0.30–$1 per full run plus ~$2/month for the two test numbers.
+
+These are the canonical Tier 2 set — keep this gathered list as the single
+source of truth. If the count grows past ~25, we've drifted off-strategy.
+
+- [ ] **E2E.1** Provision a real Twilio number for a manager (real purchase via Twilio API)
+- [ ] **E2E.2** Re-promote a demoted manager → reclaims own number, no Twilio call
+- [ ] **E2E.3** Hit `PHONE_LIMIT_REACHED` with a low cap — UI shows correct error
+- [ ] **E2E.4** Activate schedule → fire broadcast → real SMS delivered to participant phone
+- [ ] **E2E.5** Manager has no number → broadcast blocked, no SMS sent
+- [ ] **E2E.6** Real participant reply → message saved, AI processes, conversation completes
+- [ ] **E2E.7** Real `STOP` keyword → opt-out + active conversations failed (verify in real DB)
+- [ ] **E2E.8** Real `START` keyword → opted back in
+- [ ] **E2E.9** Reminder cron sends real follow-up SMS to a stale conversation
+- [ ] **E2E.10** Real status callback for failed delivery (use known-bad number) → conversation marked `failed`
+- [ ] **E2E.11** Two managers + one participant → both broadcasts deliver, replies route correctly
+- [ ] **E2E.12** Out-of-turn reply (text twice quickly) → second reply audited as `OUT_OF_TURN`
+- [ ] **E2E.13** Real MMS rejected at gate (send actual MMS via real device)
+- [ ] **E2E.14** Webhook signature validation against real Twilio signature
+- [ ] **E2E.15** Full lifecycle: broadcast → reply → AI processing → completion → delivery callback
+
+**Total: 15 scenarios** (real-cost only — everything else in the plan is free)
 
 ---
 
@@ -239,7 +345,7 @@ different setup files, different timeouts.
 ## 1. User CRUD
 
 - [ ] **1.1** Create admin user  *(free)*
-- [ ] **1.2** Create manager user — triggers phone provisioning (`onManagerCreated`)  *(mock-pending)*
+- [x] **1.2** Create manager user — triggers phone provisioning (`onManagerCreated`)  *(mock-pending)*
 - [x] **1.3** Create viewer user  *(free)*
 - [x] **1.4** Create participant user (no email, phone only)  *(free)*
 - [x] **1.5** Create with missing required field → 400  *(free)*
@@ -260,7 +366,7 @@ different setup files, different timeouts.
 - [ ] **1.20** Update user — email change triggers Supabase metadata sync  *(free)*
 - [ ] **1.21** Soft-delete user (DELETE /users/:id)  *(free)*
 - [ ] **1.22** Soft-delete then list → not returned  *(free)*
-- [ ] **1.23** Soft-delete a manager → assignedPhone stays on the soft-deleted record  *(mock-pending)*
+- [x] **1.23** Soft-delete a manager → assignedPhone stays on the soft-deleted record  *(mock-pending)*
 - [ ] **1.24** Cannot delete self  *needs verification*  *(free)*
 - [ ] **1.25** Cannot demote sole remaining admin  *needs verification — open question whether enforced*  *(free)*
 
@@ -268,11 +374,11 @@ different setup files, different timeouts.
 
 ## 2. Role transitions
 
-- [ ] **2.1** viewer → manager → triggers provisioning, gets number  *(mock-pending)*
+- [x] **2.1** viewer → manager → triggers provisioning, gets number  *(mock-pending)*
 - [ ] **2.2** viewer → admin  *(free)*
 - [ ] **2.3** manager → viewer → demotion cleanup (schedules + questions soft-deleted, ManagerGroup links removed, assignedPhone stays)  *(mock-pending)*
 - [ ] **2.4** manager → admin → demotion cleanup runs  *(mock-pending)*
-- [ ] **2.5** Demote then re-promote → reclaims own assignedPhone (Step 1 of provisioning), no Twilio call  *(mock-pending)*
+- [x] **2.5** Demote then re-promote → reclaims own assignedPhone (Step 1 of provisioning), no Twilio call  *(mock-pending)*
 - [ ] **2.6** Promote viewer to manager when at PHONE_LIMIT_REACHED → manager created with no number, warning logged (does NOT throw)  *(mock-pending)*
 - [ ] **2.7** Concurrent role-change attempts → last write wins  *(mock-pending)*
 - [ ] **2.8** participant → manager — *open question: is this transition allowed?*  *(mock-pending)*
@@ -286,9 +392,9 @@ different setup files, different timeouts.
 
 - [ ] **3.1** First manager creation → Twilio API called, number bought  *(mock-pending)*
 - [ ] **3.2** Second manager, no idle numbers → Twilio API called again  *(mock-pending)*
-- [ ] **3.3** New manager when an idle number exists → number recycled, no Twilio call  *(mock-pending)*
+- [x] **3.3** New manager when an idle number exists → number recycled, no Twilio call  *(mock-pending)*
 - [ ] **3.4** Manager re-promoted → reclaims their own number (Step 1, no Twilio)  *(mock-pending)*
-- [ ] **3.5** Hit PHONE_MAX_NUMBERS → 429 PHONE_LIMIT_REACHED  *(mock-pending)*
+- [x] **3.5** Hit PHONE_MAX_NUMBERS → 409 PHONE_LIMIT_REACHED  *(mock-pending)*
 - [ ] **3.6** Twilio API fails (network / auth error) → 502 PROVISION_FAILED  *(mock-pending)*
 - [ ] **3.7** Concurrent provisioning of same idle number → only one wins (transaction), second falls through  *(mock-pending)*
 - [ ] **3.8** Manual `POST /users/:id/provision-number` — admin for any manager → success  *(mock-pending)*
@@ -504,9 +610,9 @@ different setup files, different timeouts.
 
 | Category | Total | Passing | In progress | Not started |
 |---|---|---|---|---|
-| 1. User CRUD | 25 | 8 | 0 | 17 |
-| 2. Role transitions | 11 | 0 | 0 | 11 |
-| 3. Phone provisioning | 12 | 0 | 0 | 12 |
+| 1. User CRUD | 25 | 10 | 0 | 15 |
+| 2. Role transitions | 11 | 2 | 0 | 9 |
+| 3. Phone provisioning | 12 | 2 | 0 | 10 |
 | 4. Schedule lifecycle | 19 | 0 | 0 | 19 |
 | 5. Broadcast lifecycle | 14 | 0 | 0 | 14 |
 | 6. Inbound webhook — messages | 17 | 0 | 0 | 17 |
@@ -520,7 +626,7 @@ different setup files, different timeouts.
 | 14. Conversation reads | 8 | 0 | 0 | 8 |
 | 15. Auth flows | 7 | 0 | 0 | 7 |
 | 16. Health / observability | 4 | 0 | 0 | 4 |
-| **Total** | **184** | **8** | **0** | **176** |
+| **Total** | **184** | **14** | **0** | **170** |
 
 ---
 
