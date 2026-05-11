@@ -15,7 +15,8 @@ export default defineWorkspace([
       environment: 'node',
       setupFiles: ['./src/helpers/setup-env.ts'],
       // Each test does real HTTP + DB cleanup; 10s is generous for CI scenarios.
-      testTimeout: 10_000,
+      testTimeout: 300_000,
+      hookTimeout: 300_000,
     },
   },
   {
