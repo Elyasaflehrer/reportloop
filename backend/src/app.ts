@@ -13,8 +13,10 @@ import { questionsRoutes } from './routes/questions.js'
 import { schedulesRoutes } from './routes/schedules.js'
 import { webhooksRoutes } from './routes/webhooks.js'
 import { broadcastsRoutes } from './routes/broadcasts.js'
+import { testRoutes } from './routes/_test.js'
 import { createSmsProvider } from './services/sms/sms.factory.js'
 import type { ISmsProvider } from './services/sms/sms.provider.interface.js'
+import { MockSmsProvider } from './services/sms/providers/mock.provider.js'
 
 export async function buildApp(): Promise<FastifyInstance> {
   const app = Fastify({
@@ -72,8 +74,17 @@ export async function buildApp(): Promise<FastifyInstance> {
 
   // ─── ROUTES ───────────────────────────────────────────────────────────────
 
-  // Single provider instance shared across all routes — null when Twilio is not configured
-  const smsProvider: ISmsProvider | null = config.twilio ? createSmsProvider() : null
+  // Single provider instance shared across all routes — null when no provider is
+  // configured (no Twilio creds and not running with SMS_PROVIDER=mock).
+  const smsProvider: ISmsProvider | null =
+    config.smsProvider === 'mock' || config.twilio
+      ? createSmsProvider()
+      : null
+
+  // Concrete mock reference, used to mount test-only inspection routes.
+  // Null in any non-mock configuration — the test routes simply won't exist.
+  const mockProvider: MockSmsProvider | null =
+    smsProvider instanceof MockSmsProvider ? smsProvider : null
 
   await app.register(healthRoutes)
   await app.register(authRoutes)
@@ -86,6 +97,10 @@ export async function buildApp(): Promise<FastifyInstance> {
 
   if (smsProvider) {
     await app.register(webhooksRoutes, { smsProvider })
+  }
+
+  if (mockProvider) {
+    await app.register(testRoutes, { mockProvider })
   }
 
   // Step 21: conversation worker
