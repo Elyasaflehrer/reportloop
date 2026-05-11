@@ -27,7 +27,7 @@ const schema = z.object({
 
   // Optional — app starts without it, SMS features disabled until set.
   // See .env.example and docs/adding-sms-provider.md.
-  smsProvider: z.enum(['twilio']).default('twilio'),
+  smsProvider: z.enum(['twilio', 'mock']).default('twilio'),
   twilio: z.object({
     accountSid: z.string().min(1),
     authToken:  z.string().min(1),
@@ -160,9 +160,13 @@ export const config = schema.parse({
   },
 })
 
-if (!config.twilio) {
+if (config.smsProvider === 'twilio' && !config.twilio) {
   console.warn(
     '[config] Twilio not configured — SMS features disabled. ' +
     'Set TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN to enable.'
   )
+}
+
+if (config.smsProvider === 'mock') {
+  console.warn('[config] SMS_PROVIDER=mock — using in-memory mock; no real SMS will be sent.')
 }
