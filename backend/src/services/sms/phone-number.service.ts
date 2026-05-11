@@ -54,12 +54,12 @@ async function recycleIdleNumber(
       if (!source) return null
 
       await tx.user.update({
-        where: { id: userId },
-        data:  { assignedPhone: source.assignedPhone, assignedPhoneSid: source.assignedPhoneSid },
-      })
-      await tx.user.update({
         where: { id: source.id },
         data:  { assignedPhone: null, assignedPhoneSid: null },
+      })
+      await tx.user.update({
+        where: { id: userId },
+        data:  { assignedPhone: source.assignedPhone, assignedPhoneSid: source.assignedPhoneSid },
       })
       return source.assignedPhone!
     })
