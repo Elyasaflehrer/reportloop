@@ -73,6 +73,12 @@ const schema = z.object({
     cron: z.string().min(1).default('*/15 * * * *'),
   }),
 
+  worker: z.object({
+    stalledIntervalMs:    z.coerce.number().int().min(1000).default(300_000),
+    maxStalledCount:      z.coerce.number().int().min(0).default(1),
+    metricsMaxDataPoints: z.coerce.number().int().min(0).default(0),
+  }),
+
   rateLimits: z.object({
     globalMax: z.coerce.number().default(100),
     fireMax:   z.coerce.number().default(5),
@@ -152,6 +158,12 @@ export const config = schema.parse({
 
   reminderWorker: {
     cron: process.env.REMINDER_WORKER_CRON,
+  },
+
+  worker: {
+    stalledIntervalMs:    process.env.WORKER_STALLED_INTERVAL_MS,
+    maxStalledCount:      process.env.WORKER_MAX_STALLED_COUNT,
+    metricsMaxDataPoints: process.env.WORKER_METRICS_MAX_DATA_POINTS,
   },
 
   rateLimits: {

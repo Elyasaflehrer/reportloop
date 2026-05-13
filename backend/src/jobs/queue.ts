@@ -1,5 +1,17 @@
-import { Queue } from 'bullmq'
+import { Queue, type WorkerOptions } from 'bullmq'
 import { redis } from '../redis.js'
+import { config } from '../config.js'
+
+// ─── Shared worker options ────────────────────────────────────────────────────
+// Spread into each `new Worker(...)` call so polling cadence and metrics are
+// tuned consistently across queues. Per-workload knobs (concurrency, etc.)
+// stay at the call site.
+export const defaultWorkerOpts: Pick<WorkerOptions, 'connection' | 'stalledInterval' | 'maxStalledCount' | 'metrics'> = {
+  connection:      redis,
+  stalledInterval: config.worker.stalledIntervalMs,
+  maxStalledCount: config.worker.maxStalledCount,
+  metrics:         { maxDataPoints: config.worker.metricsMaxDataPoints },
+}
 
 // ─── Broadcast queue ──────────────────────────────────────────────────────────
 // Jobs enqueued by the scheduler (Step 18) and the manual trigger endpoint.

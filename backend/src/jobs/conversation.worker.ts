@@ -1,5 +1,5 @@
 import { Worker } from 'bullmq'
-import { redis } from '../redis.js'
+import { defaultWorkerOpts } from './queue.js'
 import { prisma } from '../db.js'
 import type { ISmsProvider } from '../services/sms/sms.provider.interface.js'
 import type { IAiProvider } from '../services/ai/ai.provider.interface.js'
@@ -17,7 +17,7 @@ export function startConversationWorker() {
       await processConversation(conversationId, smsProvider, aiProvider)
     },
     {
-      connection:  redis,
+      ...defaultWorkerOpts,
       concurrency: 5,
     },
   )

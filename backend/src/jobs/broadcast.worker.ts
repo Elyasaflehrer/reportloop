@@ -1,6 +1,6 @@
 import { Worker } from 'bullmq'
-import { redis } from '../redis.js'
 import { config } from '../config.js'
+import { defaultWorkerOpts } from './queue.js'
 import { runBroadcast } from '../services/broadcast.service.js'
 import { createSmsProvider } from '../services/sms/sms.factory.js'
 import { createAiProvider } from '../services/ai/ai.factory.js'
@@ -22,7 +22,7 @@ export function startBroadcastWorker() {
       await runBroadcast(scheduleId, smsProvider, aiProvider, triggeredBy, force)
     },
     {
-      connection:  redis,
+      ...defaultWorkerOpts,
       concurrency: config.broadcast.concurrency,
     },
   )

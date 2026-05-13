@@ -1,9 +1,8 @@
 import { Worker } from 'bullmq'
 import { Prisma, type ConversationStatus } from '@prisma/client'
-import { redis } from '../redis.js'
 import { prisma } from '../db.js'
 import { config } from '../config.js'
-import { conversationQueue } from './queue.js'
+import { conversationQueue, defaultWorkerOpts } from './queue.js'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -373,7 +372,7 @@ export function startInboundWorker() {
       return handleRegularMessage({ from, to, text, smsSid })
     },
     {
-      connection:  redis,
+      ...defaultWorkerOpts,
       concurrency: config.inboundWorker.concurrency,
     },
   )
