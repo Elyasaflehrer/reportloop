@@ -26,31 +26,45 @@
 // scenarios land here. Schedule, broadcast, and inbound-webhook
 // mock-backed scenarios get their own files when we reach them.
 
-import { beforeEach, describe, it, expect } from 'vitest'
+import { beforeEach, afterAll, describe, it, expect } from 'vitest'
 import { del, patch, post } from '../helpers/api'
-import { prisma, truncateAll } from '../helpers/db'
+import { prisma, truncateAllByPrefix } from '../helpers/db'
 import { seedAdmin, seedUser, type SeededUser } from '../helpers/factories'
 import { clearSmsLog, getSmsLog, waitForSmsCall } from '../helpers/mock-sms'
 
 describe('Manager provisioning — POST /users with role=manager', () => {
   let admin: SeededUser
 
+  // at top of each test file
+  const TABLES_TO_TRUNCATE = [
+  'users',
+  ]
+  const PREFIX_EMAIL = 'mp.'
+  const PREFIX_NAME = 'mp.'
+  const n = (n: string) =>  `${PREFIX_NAME}${n}`
+  const e = (h: string) => `${PREFIX_EMAIL}${h}@test.local`
+
   beforeEach(async () => {
-    await truncateAll()
+    await truncateAllByPrefix(PREFIX_EMAIL, TABLES_TO_TRUNCATE)
     await clearSmsLog()
-    admin = await seedAdmin({ email: 'admin@test.local' })
+    admin = await seedAdmin({ email: e(n("admin"))})
+  })
+  afterAll( async() =>{
+     await truncateAllByPrefix(PREFIX_EMAIL, TABLES_TO_TRUNCATE)
   })
 
-  it('1.2 — admin creates a manager → provisioning fires, mock logs the call, manager row gets assignedPhone + sid', async () => {
+  it('1.2 - admin creates a manager → provisioning fires, mock logs the call, manager row gets assignedPhone + sid', async () => {
+    const name = n("adminCreatesManagerProvisioningFires")
+    const email = e(name)
     const res = await post('/users', admin.token, {
-      name:  'Mary',
-      email: 'mary@test.local',
+      name:  name,
+      email: email,
       role:  'manager',
     })
     expect(res.status).toBe(201)
     expect(res.body).toMatchObject({
-      name:  'Mary',
-      email: 'mary@test.local',
+      name:  name,
+      email: email,
       role:  'manager',
     })
 
@@ -67,10 +81,10 @@ describe('Manager provisioning — POST /users with role=manager', () => {
     // DB-side assertion: the same number landed on the manager's row.
     // Poll briefly because the DB write happens just after the log entry —
     // both are inside onManagerCreated but the log push runs first.
-    let inDb = await prisma.user.findFirst({ where: { email: 'mary@test.local' } })
+    let inDb = await prisma.user.findFirst({ where: { email: email } })
     for (let i = 0; i < 20 && inDb?.assignedPhone == null; i++) {
       await new Promise((r) => setTimeout(r, 50))
-      inDb = await prisma.user.findFirst({ where: { email: 'mary@test.local' } })
+      inDb = await prisma.user.findFirst({ where: { email: email } })
     }
     expect(inDb).not.toBeNull()
     expect(inDb?.role).toBe('manager')
@@ -80,12 +94,19 @@ describe('Manager provisioning — POST /users with role=manager', () => {
 
   it('3.5 — manual provision when at PHONE_MAX_NUMBERS → 409 PHONE_LIMIT_REACHED', async () => {
     try {
+      const m1Name  = n('M1')
+      const m1Email = e(m1Name)
+      const m2Name  = n('M2')
+      const m2Email = e(m2Name)
+      const m3Name  = n('M3')
+      const m3Email = e(m3Name)
+
       // Default maxNumbers is 2 (config.ts:37). Fill both slots first.
-      const m1 = await post('/users', admin.token, { name: 'M1', email: 'm1@test.local', role: 'manager' })
+      const m1 = await post('/users', admin.token, { name: m1Name, email: m1Email, role: 'manager' })
       expect(m1.status).toBe(201)
       await waitForSmsCall((c) => c.kind === 'provisionNumber' && c.assignedPhone === '+15550000001')
 
-      const m2 = await post('/users', admin.token, { name: 'M2', email: 'm2@test.local', role: 'manager' })
+      const m2 = await post('/users', admin.token, { name: m2Name, email: m2Email, role: 'manager' })
       expect(m2.status).toBe(201)
       await waitForSmsCall((c) => c.kind === 'provisionNumber' && c.assignedPhone === '+15550000002')
 
@@ -93,7 +114,7 @@ describe('Manager provisioning — POST /users with role=manager', () => {
       // testing the create path — it's testing the manual provision endpoint —
       // so we sidestep the fire-and-forget eager attempt to keep the log state
       // deterministic for the assertion below.
-      const m3 = await seedUser({ role: 'manager', email: 'm3@test.local' })
+      const m3 = await seedUser({ role: 'manager', name: m3Name, email: m3Email })
 
       // Manual provision runs synchronously, surfaces ProvisionLimitError as 409
       const manual = await post(`/users/${m3.user.id}/provision-number`, admin.token)
@@ -111,7 +132,7 @@ describe('Manager provisioning — POST /users with role=manager', () => {
       expect(log.filter((c) => c.kind === 'provisionNumber')).toHaveLength(2)
 
       // DB: m3 still has no phone
-      const inDb = await prisma.user.findFirst({ where: { email: 'm3@test.local' } })
+      const inDb = await prisma.user.findFirst({ where: { email: m3Email } })
       expect(inDb?.assignedPhone).toBeNull()
       expect(inDb?.assignedPhoneSid).toBeNull()
     } catch (err) {
@@ -132,20 +153,22 @@ describe('Manager provisioning — POST /users with role=manager', () => {
   })
 
   it('1.23 — soft-delete a manager → assignedPhone stays on the row', async () => {
+    const name  = n('Soft')
+    const email = e(name)
     // Setup: create a manager and wait for eager provisioning to land both
     // the log entry and the DB write (assignedPhone + sid).
     const create = await post('/users', admin.token, {
-      name:  'Soft',
-      email: 'soft@test.local',
+      name:  name,
+      email: email,
       role:  'manager',
     })
     expect(create.status).toBe(201)
     await waitForSmsCall((c) => c.kind === 'provisionNumber')
 
-    let before = await prisma.user.findFirst({ where: { email: 'soft@test.local' } })
+    let before = await prisma.user.findFirst({ where: { email: email } })
     for (let i = 0; i < 20 && before?.assignedPhone == null; i++) {
       await new Promise((r) => setTimeout(r, 50))
-      before = await prisma.user.findFirst({ where: { email: 'soft@test.local' } })
+      before = await prisma.user.findFirst({ where: { email: email } })
     }
     expect(before).not.toBeNull()
     expect(before?.assignedPhone).not.toBeNull()
@@ -171,9 +194,11 @@ describe('Manager provisioning — POST /users with role=manager', () => {
   })
 
   it('2.1 — viewer promoted to manager via PATCH → provisioning fires, row gets a number', async () => {
+    const viewerName  = n('PromotedViewer')
+    const viewerEmail = e(viewerName)
     // Setup: seed a viewer directly. Viewer creation is NOT the SUT; we just
     // need a non-manager row with no assignedPhone to promote.
-    const viewer = await seedUser({ role: 'viewer', email: 'viewer@test.local' })
+    const viewer = await seedUser({ role: 'viewer', name: viewerName, email: viewerEmail })
     expect(viewer.user.assignedPhone).toBeNull()
 
     // Act: admin promotes viewer → manager
@@ -200,19 +225,21 @@ describe('Manager provisioning — POST /users with role=manager', () => {
   })
 
   it('2.5 — demote then re-promote → reclaims own number, no provider call', async () => {
+    const name  = n('Re')
+    const email = e(name)
     // 1. Create a manager and wait for eager provisioning to land the phone.
     const create = await post('/users', admin.token, {
-      name:  'Re',
-      email: 're@test.local',
+      name:  name,
+      email: email,
       role:  'manager',
     })
     expect(create.status).toBe(201)
     await waitForSmsCall((c) => c.kind === 'provisionNumber')
 
-    let mgr = await prisma.user.findFirst({ where: { email: 're@test.local' } })
+    let mgr = await prisma.user.findFirst({ where: { email: email } })
     for (let i = 0; i < 20 && mgr?.assignedPhone == null; i++) {
       await new Promise((r) => setTimeout(r, 50))
-      mgr = await prisma.user.findFirst({ where: { email: 're@test.local' } })
+      mgr = await prisma.user.findFirst({ where: { email: email } })
     }
     const originalPhone = mgr!.assignedPhone!
     const originalSid   = mgr!.assignedPhoneSid!
@@ -269,19 +296,24 @@ describe('Manager provisioning — POST /users with role=manager', () => {
     //                          transfers the phone: M2 gains it, M1 loses it.
     //   purchaseNewNumber     → not reached.
 
+    const m1Name  = n('M1Idle')
+    const m1Email = e(m1Name)
+    const m2Name  = n('M2Recycle')
+    const m2Email = e(m2Name)
+
     // 1. Create M1, wait for eager provisioning to land the phone.
     const m1Create = await post('/users', admin.token, {
-      name:  'M1Idle',
-      email: 'm1idle@test.local',
+      name:  m1Name,
+      email: m1Email,
       role:  'manager',
     })
     expect(m1Create.status).toBe(201)
     await waitForSmsCall((c) => c.kind === 'provisionNumber')
 
-    let m1 = await prisma.user.findFirst({ where: { email: 'm1idle@test.local' } })
+    let m1 = await prisma.user.findFirst({ where: { email: m1Email } })
     for (let i = 0; i < 20 && m1?.assignedPhone == null; i++) {
       await new Promise((r) => setTimeout(r, 50))
-      m1 = await prisma.user.findFirst({ where: { email: 'm1idle@test.local' } })
+      m1 = await prisma.user.findFirst({ where: { email: m1Email } })
     }
     const m1OriginalPhone = m1!.assignedPhone!
     const m1OriginalSid   = m1!.assignedPhoneSid!
@@ -300,17 +332,17 @@ describe('Manager provisioning — POST /users with role=manager', () => {
 
     // 4. Create M2 — eager provisioning runs the chain, should recycle M1's phone.
     const m2Create = await post('/users', admin.token, {
-      name:  'M2Recycle',
-      email: 'm2recycle@test.local',
+      name:  m2Name,
+      email: m2Email,
       role:  'manager',
     })
     expect(m2Create.status).toBe(201)
 
     // 5. Poll M2's row — recycle is internal, no log entry to wait on.
-    let m2 = await prisma.user.findFirst({ where: { email: 'm2recycle@test.local' } })
+    let m2 = await prisma.user.findFirst({ where: { email: m2Email } })
     for (let i = 0; i < 40 && m2?.assignedPhone == null; i++) {
       await new Promise((r) => setTimeout(r, 50))
-      m2 = await prisma.user.findFirst({ where: { email: 'm2recycle@test.local' } })
+      m2 = await prisma.user.findFirst({ where: { email: m2Email } })
     }
 
     // 6. Critical assertion — M2 inherited M1's exact phone + sid.

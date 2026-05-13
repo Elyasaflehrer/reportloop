@@ -60,7 +60,30 @@ export async function truncateAll(): Promise<void> {
   }
   await prisma.$executeRawUnsafe(`
     TRUNCATE TABLE ${TABLES_TO_TRUNCATE.join(', ')}
-    RESTART IDENTITY CASCADE
   `)
   await prisma.$executeRawUnsafe(`DELETE FROM auth.users CASCADE`)
+}
+
+
+export async function truncateAllByPrefix(prefix?: string, tables: string[] = []): Promise<void> {
+  if (!prefix) {
+    // legacy global wipe (still used by tests not yet converted)
+    await prisma.$executeRawUnsafe(`TRUNCATE TABLE ${tables.join(', ')} CASCADE`)
+    await prisma.$executeRawUnsafe(`DELETE FROM auth.users`)
+    return
+  }
+  if ( tables.length > 0 ) {
+    await prisma.$executeRawUnsafe(
+      `DELETE FROM ${tables.join(', ')} WHERE email LIKE $1`,
+      `${prefix}%`,
+    )
+    await prisma.$executeRawUnsafe(
+      `DELETE FROM ${tables.join(', ')} WHERE name LIKE $1`,
+      `${prefix}%`,
+    )
+  }
+  await prisma.$executeRawUnsafe(
+    `DELETE FROM auth.users WHERE email LIKE $1`,
+    `${prefix}%`,
+  )
 }
