@@ -3,11 +3,6 @@ output "cloud_run_url" {
   value       = google_cloud_run_v2_service.backend.uri
 }
 
-output "artifact_registry" {
-  description = "Docker image path prefix for CI/CD"
-  value       = "${var.region}-docker.pkg.dev/${var.project_id}/reportloop/backend"
-}
-
 output "ci_service_account" {
   description = "CI/CD service account email — download a key and add as GCP_SA_KEY GitHub secret"
   value       = google_service_account.ci.email

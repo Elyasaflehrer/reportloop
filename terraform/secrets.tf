@@ -1,7 +1,3 @@
-# Secret shells — Terraform creates the resource, values are added manually.
-# This keeps secret values out of Terraform state.
-# Rule: only credentials and secrets here — public URLs and config go as plain env vars.
-
 locals {
   secret_names = [
     "DATABASE_URL",
@@ -19,10 +15,16 @@ locals {
 resource "google_secret_manager_secret" "secrets" {
   for_each  = toset(local.secret_names)
   secret_id = each.value
-
   replication {
     auto {}
   }
 
   depends_on = [google_project_service.apis]
+}
+
+resource "google_secret_manager_secret_version" "values" {
+  for_each               = google_secret_manager_secret.secrets
+  secret                 = each.value.id
+  secret_data_wo         = var.secret_values[each.key]
+  secret_data_wo_version = 1
 }

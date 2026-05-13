@@ -12,8 +12,6 @@ variable "region" {
 variable "backend_image" {
   description = "Full Docker image path including tag — set by CI after first build"
   type        = string
-  default     = "elyasaflehrer/reportloop-backend-dev:latest"
-  # default     = "us-central1-docker.pkg.dev/reportloop-dev/reportloop/reportloop-backend:latest"
 }
 
 variable "app_base_url" {
@@ -33,6 +31,13 @@ variable "deployer_email" {
   type        = string
 }
 
-variable "phone_max_number"{
+variable "phone_max_number" {
   description = "Maxnumber of phone numbers that can be purchased from the provider"
+}
+
+variable "secret_values" {
+  description = "Values for the secrets in local.secret_names — kept out of state via write-only attrs"
+  type        = map(string)
+  sensitive   = true
+  default     = {}
 }

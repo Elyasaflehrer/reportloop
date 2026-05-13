@@ -13,7 +13,6 @@ resource "google_service_account" "ci" {
 
 locals {
   ci_roles = [
-    "roles/run.admin",
     "roles/artifactregistry.writer",
     "roles/secretmanager.secretAccessor",
     "roles/iam.serviceAccountUser",

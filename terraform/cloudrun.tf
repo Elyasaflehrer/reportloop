@@ -1,7 +1,6 @@
 resource "google_cloud_run_v2_service" "backend" {
   name     = "reportloop-backend"
   location = var.region
-  client = "cloud-console"
   template {
     scaling {
       min_instance_count = 1
@@ -92,10 +91,9 @@ resource "google_cloud_run_v2_service" "backend" {
       }
     }
   }
-
+  deletion_protection = false
   depends_on = [
     google_project_service.apis,
-    google_artifact_registry_repository.backend,
     google_secret_manager_secret.secrets,
   ]
 }
