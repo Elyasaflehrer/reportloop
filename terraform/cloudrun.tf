@@ -7,7 +7,7 @@ resource "google_cloud_run_v2_service" "backend" {
       min_instance_count = 1
       max_instance_count = 10
     }
-
+    service_account = google_service_account.backend_runtime.email
     containers {
       image = var.backend_image
 
@@ -29,8 +29,8 @@ resource "google_cloud_run_v2_service" "backend" {
         value = "twilio"
       }
       env {
-        name  = "TWILIO_FROM_NUMBER"
-        value = "+15159494777"
+        name  = "PHONE_MAX_NUMBERS"
+        value = "2"
       }
       env {
         name  = "SUPABASE_URL"

@@ -27,11 +27,13 @@ resource "google_project_iam_member" "ci_roles" {
   member   = "serviceAccount:${google_service_account.ci.email}"
 }
 
-# Allow Cloud Run's default service account to read secrets at startup
-resource "google_project_iam_member" "cloudrun_secret_access" {
-  project = var.project_id
-  role    = "roles/secretmanager.secretAccessor"
-  member  = "serviceAccount:${data.google_compute_default_service_account.default.email}"
+resource "google_service_account" "backend_runtime" {
+  account_id   = "reportloop-backend-runtime"
+  display_name = "ReportLoop backend Cloud Run runtime"
 }
 
-data "google_compute_default_service_account" "default" {}
+resource "google_project_iam_member" "backend_secret_access" {
+  project = var.project_id
+  role    = "roles/secretmanager.secretAccessor"
+  member  = "serviceAccount:${google_service_account.backend_runtime.email}"
+}
