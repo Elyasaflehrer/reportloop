@@ -7,10 +7,8 @@ const TwilioStatusCard = () => {
     setStatus(null)
   }, [])
 
-  const webhookUrl =
-    typeof window !== 'undefined' && window.location?.origin
-      ? `${window.location.origin}/webhooks/twilio`
-      : '/webhooks/twilio'
+  const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || ''
+  const webhookUrl = `${apiBaseUrl}/webhooks/twilio`
 
   return (
     <div style={{ maxWidth: 560, background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--radius)', padding: '22px 24px', boxShadow: 'var(--shadow)' }}>
@@ -21,7 +19,7 @@ const TwilioStatusCard = () => {
         </span>
       </div>
       <p style={{ fontSize: 13, color: 'var(--text-2)', marginBottom: 16, lineHeight: 1.5 }}>
-        Twilio credentials are set via <code>TWILIO_ACCOUNT_SID</code>, <code>TWILIO_AUTH_TOKEN</code>, and <code>TWILIO_FROM_NUMBER</code> environment variables on the server. They are never stored or transmitted through the browser.
+        Twilio credentials are set via <code>TWILIO_ACCOUNT_SID</code> and <code>TWILIO_AUTH_TOKEN</code> environment variables on the server. The <code>PHONE_MAX_NUMBERS</code> variable caps how many numbers can be provisioned from the provider. Credentials are never stored or transmitted through the browser.
       </p>
       <div style={{ paddingTop: 14, borderTop: '1px solid var(--border)' }}>
         <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-2)', marginBottom: 6 }}>Webhook URL (configure in Twilio console)</div>
