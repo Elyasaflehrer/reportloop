@@ -2,7 +2,6 @@ import twilio from 'twilio'
 import type { FastifyRequest } from 'fastify'
 import type {
   ISmsProvider,
-  InboundSmsPayload,
   SmsSendResult,
   WebhookEvent,
 } from '../sms.provider.interface.js'
@@ -64,16 +63,12 @@ export class TwilioProvider implements ISmsProvider {
   }
 
   /**
-   * Send an SMS and return rich result data (segment count + initial status).
-   *
-   * Wraps Twilio's `client.messages.create()` and the same auth/error
-   * branching used by {@link sendSms} — the legacy `sendSms` delegates
-   * here so error handling lives in one place.
+   * Send an SMS via Twilio and return structured result data.
    *
    * @throws TwilioAuthError if Twilio returns code 20003 (bad credentials).
    * @throws SmsDeliveryError on any other Twilio API failure.
    */
-  async sendSmsDetailed(to: string, body: string, from: string): Promise<SmsSendResult> {
+  async sendSms(to: string, body: string, from: string): Promise<SmsSendResult> {
     try {
       const message = await this.client.messages.create({
         to,
@@ -84,8 +79,8 @@ export class TwilioProvider implements ISmsProvider {
       return {
         messageId: message.sid,
         // Twilio returns numSegments as a string; coerce to number for the
-        // provider-agnostic shape. `?? '1'` guards against the rare case
-        // Twilio omits the field entirely.
+        // provider-agnostic shape. `?? '1'` guards the rare case Twilio
+        // omits the field entirely.
         segments:  Number(message.numSegments ?? '1'),
         status:    message.status,
       }
@@ -93,21 +88,6 @@ export class TwilioProvider implements ISmsProvider {
       if (err.code === 20003) throw new TwilioAuthError()
       throw new SmsDeliveryError(err.message ?? 'SMS delivery failed', err.code)
     }
-  }
-
-  /**
-   * Legacy SMS send returning just the SID.
-   *
-   * Delegates to {@link sendSmsDetailed} so the underlying API call and
-   * error handling stay in one place. Retained during the migration
-   * window so existing callers (broadcast, conversation, reminder
-   * workers) keep compiling until they migrate in Step 5.
-   *
-   * @deprecated Use {@link sendSmsDetailed}.
-   */
-  async sendSms(to: string, body: string, from: string): Promise<string> {
-    const result = await this.sendSmsDetailed(to, body, from)
-    return result.messageId
   }
 
   validateWebhookSignature(req: FastifyRequest): boolean {
@@ -134,7 +114,7 @@ export class TwilioProvider implements ISmsProvider {
    * The handler runs its own malformed-payload check (and logs/drops 200
    * if required fields are absent).
    */
-  parseWebhookEvent(req: FastifyRequest): WebhookEvent {
+  parseWebhook(req: FastifyRequest): WebhookEvent {
     const body = req.body as Record<string, string>
 
     // Discriminator: MessageStatus is present on status callbacks and
@@ -166,23 +146,6 @@ export class TwilioProvider implements ISmsProvider {
       messageId: body.MessageSid ?? body.SmsSid ?? '',
       segments:  Number(body.NumSegments ?? '1'),
       numMedia:  Number(body.NumMedia    ?? '0'),
-    }
-  }
-
-  /**
-   * Legacy inbound-only webhook parsing.
-   *
-   * @deprecated Use {@link parseWebhookEvent} which also handles status
-   *   callbacks. Retained during the migration window to satisfy the
-   *   `ISmsProvider` interface; will be removed in Step 6.
-   */
-  parseInboundWebhook(req: FastifyRequest): InboundSmsPayload {
-    const body = req.body as Record<string, string>
-    return {
-      from:      body.From,
-      to:        body.To,
-      body:      body.Body,
-      messageId: body.MessageSid,
     }
   }
 }

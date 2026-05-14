@@ -45,11 +45,8 @@ export async function webhooksRoutes(
 
       // ── Event extraction ────────────────────────────────────────────────────
       // Provider-agnostic — Twilio-specific field names live in the provider's
-      // parseWebhookEvent implementation. The `!` is safe here: the method is
-      // optional on the interface during the migration window but both Twilio
-      // and Mock providers implement it (Steps 2 + 3). The `!` is removed in
-      // Step 6 when the method becomes required on ISmsProvider.
-      const event = smsProvider.parseWebhookEvent!(req)
+      // parseWebhook implementation.
+      const event = smsProvider.parseWebhook(req)
 
       // ── Missing-fields guard (Cases 6, 16, 17, 25) ──────────────────────────
       // Drop malformed payloads silently with 200 — Twilio shouldn't retry.

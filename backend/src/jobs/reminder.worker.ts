@@ -81,7 +81,7 @@ async function runReminderLadder(smsProvider: ISmsProvider) {
     }
 
     try {
-      const sendResult = await smsProvider.sendSmsDetailed!(conv.user.phone, originalBody, from)
+      const sendResult = await smsProvider.sendSms(conv.user.phone, originalBody, from)
       logSmsSent(sendResult, conv.user.phone, originalBody)
 
       await prisma.conversation.update({

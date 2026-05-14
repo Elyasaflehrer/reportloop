@@ -132,7 +132,7 @@ async function processConversation(
 
   // Some answers still missing → send follow-up and wait for next reply
   try {
-    const sendResult = await smsProvider.sendSmsDetailed!(conversation.user.phone, result.followUp, from)
+    const sendResult = await smsProvider.sendSms(conversation.user.phone, result.followUp, from)
     logSmsSent(sendResult, conversation.user.phone, result.followUp)
 
     await prisma.message.create({

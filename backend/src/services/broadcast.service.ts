@@ -191,7 +191,7 @@ async function processParticipant(params: {
 
   // Send SMS
   try {
-    const result = await smsProvider.sendSmsDetailed!(participant.phone, body, from)
+    const result = await smsProvider.sendSms(participant.phone, body, from)
     logSmsSent(result, participant.phone, body)
 
     await prisma.message.create({

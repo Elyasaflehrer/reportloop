@@ -7,11 +7,6 @@ import type { FastifyRequest } from 'fastify'
  * implements this interface. Business logic (workers, services, the
  * webhook handler) never imports a provider directly — only this
  * interface.
- *
- * Two of the methods (`sendSmsDetailed`, `parseWebhookEvent`) are being
- * phased in to replace the older `sendSms` and `parseInboundWebhook`.
- * Once all callers migrate, the old methods are removed and the new
- * ones become required (see sms-provider-abstraction-plan.md).
  */
 export interface ISmsProvider {
   /**
@@ -20,29 +15,10 @@ export interface ISmsProvider {
    * @param to   Recipient phone number in E.164 format.
    * @param body Message text (subject to provider-specific length limits).
    * @param from Sender phone number in E.164 format — must be owned by us.
-   * @returns The provider's unique message identifier (e.g. Twilio SID).
-   * @throws SmsDeliveryError on transient provider failure.
-   *
-   * @deprecated Use {@link ISmsProvider.sendSmsDetailed} which returns
-   *   richer result data. This signature will be removed in the cleanup
-   *   step of the provider-abstraction refactor.
-   */
-  sendSms(to: string, body: string, from: string): Promise<string>
-
-  /**
-   * Send an SMS message and return structured result data.
-   *
-   * Same delivery semantics as {@link ISmsProvider.sendSms}, but the
-   * return value also includes the segment count and initial status from
-   * the provider's API response — used by Phase 3 cost-observability
-   * logging.
-   *
-   * @param to   Recipient phone number in E.164 format.
-   * @param body Message text.
-   * @param from Sender phone number in E.164 format.
    * @returns An {@link SmsSendResult} with messageId, segments, and status.
+   * @throws Provider-specific delivery / auth errors.
    */
-  sendSmsDetailed?(to: string, body: string, from: string): Promise<SmsSendResult>
+  sendSms(to: string, body: string, from: string): Promise<SmsSendResult>
 
   /**
    * Provision a new phone number from the provider's available inventory
@@ -80,29 +56,17 @@ export interface ISmsProvider {
   validateWebhookSignature(req: FastifyRequest): boolean
 
   /**
-   * Extract the basic inbound-SMS fields from a webhook request.
-   *
-   * @param req Fastify request — caller MUST have validated the signature.
-   * @returns The {from, to, body, messageId} fields parsed from the body.
-   *
-   * @deprecated Use {@link ISmsProvider.parseWebhookEvent} which also
-   *   covers status callbacks and includes segment count. Will be removed
-   *   in the cleanup step.
-   */
-  parseInboundWebhook(req: FastifyRequest): InboundSmsPayload
-
-  /**
    * Extract a normalized {@link WebhookEvent} from a webhook request.
    *
-   * Replaces {@link ISmsProvider.parseInboundWebhook} with a richer return
-   * that distinguishes (a) an inbound SMS sent by a participant from
-   * (b) a status callback updating the delivery state of a message we
-   * previously sent. The handler branches on `event.type`.
+   * Providers POST both inbound messages and delivery status callbacks
+   * to the same endpoint. This method returns a discriminated union so
+   * the handler can branch on `event.type` and access only the fields
+   * that exist for that variant.
    *
    * @param req Fastify request — caller MUST have validated the signature.
-   * @returns A discriminated {@link WebhookEvent}: `inbound` or `status`.
+   * @returns A {@link WebhookEvent}: `'inbound'` or `'status'`.
    */
-  parseWebhookEvent?(req: FastifyRequest): WebhookEvent
+  parseWebhook(req: FastifyRequest): WebhookEvent
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -112,10 +76,10 @@ export interface ISmsProvider {
 /**
  * Result of a successful SMS send.
  *
- * Returned by {@link ISmsProvider.sendSmsDetailed}. Captures the fields we
- * care about from the provider's API response: the message ID for
- * tracking, segment count for cost monitoring, and the initial status
- * for delivery debugging.
+ * Returned by {@link ISmsProvider.sendSms}. Captures the fields we care
+ * about from the provider's API response: the message ID for tracking,
+ * segment count for cost monitoring, and the initial status for
+ * delivery debugging.
  */
 export interface SmsSendResult {
   /** Provider's unique message identifier (e.g. Twilio SID like `SMxxx`). */
@@ -184,7 +148,7 @@ export type WebhookEvent =
 
       /**
        * Provider's message identifier — matches the `messageId` returned
-       * by {@link ISmsProvider.sendSmsDetailed} when we sent it.
+       * by {@link ISmsProvider.sendSms} when we sent it.
        */
       messageId: string
 
@@ -204,25 +168,3 @@ export type WebhookEvent =
       /** Human-readable error description on `failed` / `undelivered`. */
       errorMessage?: string
     }
-
-/**
- * Basic inbound SMS payload — the original shape returned by
- * {@link ISmsProvider.parseInboundWebhook}.
- *
- * @deprecated Use the `'inbound'` arm of {@link WebhookEvent} instead.
- *   Kept only to satisfy the old method signature during the migration
- *   window.
- */
-export type InboundSmsPayload = {
-  /** Participant's phone (the webhook's `From` field). */
-  from: string
-
-  /** Manager's number (the webhook's `To` field). */
-  to: string
-
-  /** Message body text. */
-  body: string
-
-  /** Provider's message identifier. */
-  messageId: string
-}

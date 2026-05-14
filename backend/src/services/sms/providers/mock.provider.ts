@@ -1,7 +1,6 @@
 import type { FastifyRequest } from 'fastify'
 import type {
   ISmsProvider,
-  InboundSmsPayload,
   SmsSendResult,
   WebhookEvent,
 } from '../sms.provider.interface.js'
@@ -12,9 +11,7 @@ import type {
  * One recorded interaction with the mock provider.
  *
  * Tests inspect the call log via {@link MockSmsProvider.getCallLog} to
- * assert that the right side effects happened. Both `sendSms` and
- * `sendSmsDetailed` produce a `kind: 'sendSms'` entry — the underlying
- * operation is the same.
+ * assert that the right side effects happened.
  */
 export type MockSmsCall =
   | {
@@ -78,13 +75,13 @@ export class MockSmsProvider implements ISmsProvider {
   }
 
   /**
-   * Mock send returning rich {@link SmsSendResult}.
+   * Mock send returning structured {@link SmsSendResult}.
    *
-   * Generates a deterministic `MOCKMSG###### ` message ID, records the
+   * Generates a deterministic `MOCKMSG######` message ID, records the
    * call in the log, and returns segments=1 / status='queued'. Tests
    * that need other values would override (not currently parameterizable).
    */
-  async sendSmsDetailed(to: string, body: string, from: string): Promise<SmsSendResult> {
+  async sendSms(to: string, body: string, from: string): Promise<SmsSendResult> {
     this.messageCounter += 1
     const messageId = `MOCKMSG${this.messageCounter.toString().padStart(6, '0')}`
     this.callLog.push({
@@ -100,19 +97,6 @@ export class MockSmsProvider implements ISmsProvider {
       segments: 1,         // mock always assumes single-segment; tests don't exercise multi-segment yet
       status:   'queued',  // mirrors Twilio's initial status
     }
-  }
-
-  /**
-   * Legacy mock send returning just the message ID.
-   *
-   * Delegates to {@link sendSmsDetailed} so log-recording and ID
-   * generation stay in one place.
-   *
-   * @deprecated Use {@link sendSmsDetailed}.
-   */
-  async sendSms(to: string, body: string, from: string): Promise<string> {
-    const result = await this.sendSmsDetailed(to, body, from)
-    return result.messageId
   }
 
   validateWebhookSignature(_req: FastifyRequest): boolean {
@@ -132,7 +116,7 @@ export class MockSmsProvider implements ISmsProvider {
    * `segments` defaults to 1 since the mock doesn't model multi-segment
    * messages; `numMedia` defaults to 0 (no MMS in tests yet).
    */
-  parseWebhookEvent(req: FastifyRequest): WebhookEvent {
+  parseWebhook(req: FastifyRequest): WebhookEvent {
     const body = req.body as Record<string, string>
 
     if (body.status) {
@@ -156,23 +140,6 @@ export class MockSmsProvider implements ISmsProvider {
       messageId: body.messageId ?? '',
       segments:  Number(body.segments ?? '1'),
       numMedia:  Number(body.numMedia ?? '0'),
-    }
-  }
-
-  /**
-   * Legacy mock inbound parsing.
-   *
-   * @deprecated Use {@link parseWebhookEvent}. Retained during the
-   *   migration window.
-   */
-  parseInboundWebhook(req: FastifyRequest): InboundSmsPayload {
-    // Mock inbound webhooks are JSON, not form-encoded.
-    const body = req.body as Record<string, string>
-    return {
-      from:      body.from,
-      to:        body.to,
-      body:      body.body,
-      messageId: body.messageId,
     }
   }
 
