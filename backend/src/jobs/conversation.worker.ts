@@ -5,6 +5,7 @@ import type { ISmsProvider } from '../services/sms/sms.provider.interface.js'
 import type { IAiProvider } from '../services/ai/ai.provider.interface.js'
 import { createSmsProvider } from '../services/sms/sms.factory.js'
 import { createAiProvider } from '../services/ai/ai.factory.js'
+import { logSmsSent } from '../services/sms/log.js'
 
 export function startConversationWorker() {
   const smsProvider = createSmsProvider()
@@ -131,14 +132,15 @@ async function processConversation(
 
   // Some answers still missing → send follow-up and wait for next reply
   try {
-    const twilioSid = await smsProvider.sendSms(conversation.user.phone, result.followUp, from)
+    const sendResult = await smsProvider.sendSmsDetailed!(conversation.user.phone, result.followUp, from)
+    logSmsSent(sendResult, conversation.user.phone, result.followUp)
 
     await prisma.message.create({
       data: {
         conversationId,
         role:      'ai',
         body:      result.followUp,
-        twilioSid,
+        twilioSid: sendResult.messageId,   // DB column keeps its name; v2 cleanup
       },
     })
 

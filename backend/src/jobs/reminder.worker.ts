@@ -5,6 +5,7 @@ import { DateTime } from 'luxon'
 import { prisma } from '../db.js'
 import { config } from '../config.js'
 import type { ISmsProvider } from '../services/sms/sms.provider.interface.js'
+import { logSmsSent } from '../services/sms/log.js'
 
 export function startReminderWorker(smsProvider: ISmsProvider) {
   const reminderWorkerCron = config.reminderWorker.cron
@@ -80,7 +81,8 @@ async function runReminderLadder(smsProvider: ISmsProvider) {
     }
 
     try {
-      await smsProvider.sendSms(conv.user.phone, originalBody, from)
+      const sendResult = await smsProvider.sendSmsDetailed!(conv.user.phone, originalBody, from)
+      logSmsSent(sendResult, conv.user.phone, originalBody)
 
       await prisma.conversation.update({
         where: { id: conv.id },

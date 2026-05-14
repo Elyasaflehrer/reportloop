@@ -4,6 +4,7 @@ import { config } from '../config.js'
 import type { ISmsProvider } from './sms/sms.provider.interface.js'
 import type { IAiProvider } from './ai/ai.provider.interface.js'
 import { assertMessageLength, SmsTooLongError } from './sms/sms.service.js'
+import { logSmsSent } from './sms/log.js'
 
 const SMS_RETRY_LIMIT = 2
 
@@ -190,14 +191,15 @@ async function processParticipant(params: {
 
   // Send SMS
   try {
-    const twilioSid = await smsProvider.sendSms(participant.phone, body, from)
+    const result = await smsProvider.sendSmsDetailed!(participant.phone, body, from)
+    logSmsSent(result, participant.phone, body)
 
     await prisma.message.create({
       data: {
         conversationId: conversation.id,
         role:           'ai',
         body,
-        twilioSid,
+        twilioSid:      result.messageId,   // DB column keeps its name; v2 cleanup
       },
     })
 
