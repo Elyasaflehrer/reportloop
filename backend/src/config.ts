@@ -60,6 +60,15 @@ const schema = z.object({
     maxLength: z.coerce.number().default(459),
   }),
 
+  // When true, SMS log lines (Phase 3 observability) include the message body.
+  // Default false — bodies are PII and shouldn't leak into Cloud Logging.
+  // Toggle on for local debugging only.
+  //
+  // Note: `z.coerce.boolean()` would be wrong here — Boolean("false") is true
+  // in JS because non-empty strings are truthy. The transform below treats
+  // only the literal string "true" as true.
+  logSmsBody: z.string().optional().transform(v => v === 'true'),
+
   broadcast: z.object({
     concurrency:  z.coerce.number().default(3),
     retryCount:   z.coerce.number().default(3),
@@ -152,6 +161,8 @@ export const config = schema.parse({
   sms: {
     maxLength: process.env.SMS_MAX_LENGTH,
   },
+
+  logSmsBody: process.env.LOG_SMS_BODY,
 
   broadcast: {
     concurrency:  process.env.BROADCAST_CONCURRENCY,
