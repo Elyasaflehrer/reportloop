@@ -8,7 +8,7 @@ export const apiFetch = async (
   const res = await fetch(`${API_BASE_URL}${path}`, {
     method,
     headers: {
-      'Content-Type': 'application/json',
+      ...(body != null ? { 'Content-Type': 'application/json' } : {}),
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
     },
     ...(body != null ? { body: JSON.stringify(body) } : {}),
