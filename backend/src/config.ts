@@ -48,6 +48,14 @@ const schema = z.object({
     apiKey:   z.string().min(1),
   }).nullable().default(null),
 
+  // Optional prompt overrides. Defaults live in services/ai/prompts.ts.
+  // Set any of these to swap a prompt template without changing code.
+  aiPrompts: z.object({
+    initial: z.string().optional(),
+    shorten: z.string().optional(),
+    extract: z.string().optional(),
+  }),
+
   sms: z.object({
     maxLength: z.coerce.number().default(459),
   }),
@@ -134,6 +142,12 @@ export const config = schema.parse({
         apiKey:   (process.env.ANTHROPIC_API_KEY || process.env.OPENAI_API_KEY)!,
       }
     : null,
+
+  aiPrompts: {
+    initial: process.env.AI_PROMPT_INITIAL,
+    shorten: process.env.AI_PROMPT_SHORTEN,
+    extract: process.env.AI_PROMPT_EXTRACT,
+  },
 
   sms: {
     maxLength: process.env.SMS_MAX_LENGTH,
