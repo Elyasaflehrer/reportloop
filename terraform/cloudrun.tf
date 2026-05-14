@@ -2,12 +2,19 @@ resource "google_cloud_run_v2_service" "backend" {
   name     = "reportloop-backend"
   location = var.region
   template {
+    # Pinned to a single instance — required for the Redis sidecar to be the
+    # single source of truth for BullMQ queue state. Scaling out would give
+    # each instance its own isolated Redis and silently break the queue.
     scaling {
       min_instance_count = 1
-      max_instance_count = 10
+      max_instance_count = 1
     }
     service_account = google_service_account.backend_runtime.email
+
+    # Ingress container must come first in the list — Cloud Run uses ordering
+    # to identify the HTTP-receiving container in multi-container services.
     containers {
+      name  = "backend"
       image = var.backend_image
 
       ports {
@@ -34,6 +41,10 @@ resource "google_cloud_run_v2_service" "backend" {
       env {
         name  = "SUPABASE_URL"
         value = "https://fwqdjyjabhojqdiyolul.supabase.co"
+      }
+      env {
+        name  = "REDIS_URL"
+        value = "redis://localhost:6379"
       }
       env {
         name  = "APP_BASE_URL"
@@ -87,6 +98,22 @@ resource "google_cloud_run_v2_service" "backend" {
               version = "latest"
             }
           }
+        }
+      }
+    }
+
+    # ── Redis sidecar ─────────────────────────────────────────────────────────
+    # Runs alongside the backend container in the same instance; backend
+    # reaches it at redis://localhost:6379. Data is in-memory and lost on
+    # any revision deploy or instance restart — acceptable for a test env
+    # where queue jobs complete within seconds.
+    containers {
+      name  = "redis"
+      image = "redis:7-alpine"
+      resources {
+        limits = {
+          cpu    = "500m"
+          memory = "256Mi"
         }
       }
     }
