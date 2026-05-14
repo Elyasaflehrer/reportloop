@@ -46,10 +46,10 @@ function assert(condition: boolean, message: string) {
 
 // Provider that throws if provisionNumber is ever called — used for paths 1 & 2
 const neverProvision: ISmsProvider = {
-  sendSms:                   async () => { throw new Error('sendSms should not be called') },
-  validateWebhookSignature:  ()      => true,
-  parseInboundWebhook:       ()      => { throw new Error('parseInboundWebhook should not be called') },
-  provisionNumber:           async () => { throw new Error('provisionNumber was called but should not have been') },
+  sendSms:                  async () => { throw new Error('sendSms should not be called') },
+  validateWebhookSignature: ()      => true,
+  parseWebhook:             ()      => { throw new Error('parseWebhook should not be called') },
+  provisionNumber:          async () => { throw new Error('provisionNumber was called but should not have been') },
 }
 
 const phoneSettings: PhoneProvisionSettings = {
